@@ -55,8 +55,8 @@ document.body.insertAdjacentHTML('afterbegin', `
  <dialog id="revisionDialog"><div class="dialog-heading"><h2>過去の版</h2><button class="secondary" id="closeRevision" aria-label="閉じる">×</button></div><div id="revisionContent"></div><button class="primary" id="restoreRevision" hidden>この版へ戻す</button></dialog>
  <dialog id="passwordDialog"><form id="passwordForm"><div class="dialog-heading"><h2>パスワード変更</h2><button type="button" class="secondary" id="closePassword" aria-label="閉じる">×</button></div>
    <div class="field"><label for="currentPassword">現在のパスワード</label><input id="currentPassword" type="password" required autocomplete="current-password" maxlength="128"></div>
-   <div class="field"><label for="nextPassword">新しいパスワード（12文字以上）</label><input id="nextPassword" type="password" required minlength="12" maxlength="128" autocomplete="new-password"></div>
-   <div class="field"><label for="nextPasswordConfirm">新しいパスワード（確認）</label><input id="nextPasswordConfirm" type="password" required minlength="12" maxlength="128" autocomplete="new-password"></div>
+   <div class="field"><label for="nextPassword">新しいパスワード（8文字以上・半角英数字・大文字と小文字必須）</label><input id="nextPassword" type="password" required minlength="8" maxlength="128" pattern="(?=.*[A-Z])(?=.*[a-z])[A-Za-z0-9]{8,128}" autocomplete="new-password"></div>
+   <div class="field"><label for="nextPasswordConfirm">新しいパスワード（確認）</label><input id="nextPasswordConfirm" type="password" required minlength="8" maxlength="128" autocomplete="new-password"></div>
    <p id="passwordError" role="alert"></p><button class="primary">変更</button>
  </form></dialog>
  <dialog id="issuedDialog"><div class="dialog-heading"><h2>発行したログイン情報</h2><button class="secondary" id="closeIssued" aria-label="閉じる">×</button></div>
@@ -68,8 +68,8 @@ document.body.insertAdjacentHTML('afterbegin', `
  <dialog id="resetDialog"><form id="resetForm"><div class="dialog-heading"><h2>パスワード再設定</h2><button type="button" class="secondary" id="closeReset" aria-label="閉じる">×</button></div>
    <p id="resetPerson"></p>
    <div class="field"><label for="resetMode">発行方法</label><select id="resetMode"><option value="auto">自動発行</option><option value="manual">任意のパスワードを指定</option></select></div>
-   <div id="manualResetFields" hidden><div class="field"><label for="resetPassword">新しいパスワード（12文字以上）</label><input id="resetPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password"></div>
-   <div class="field"><label for="resetPasswordConfirm">新しいパスワード（確認）</label><input id="resetPasswordConfirm" type="password" minlength="12" maxlength="128" autocomplete="new-password"></div></div>
+   <div id="manualResetFields" hidden><div class="field"><label for="resetPassword">新しいパスワード（8文字以上・半角英数字・大文字と小文字必須）</label><input id="resetPassword" type="password" minlength="8" maxlength="128" pattern="(?=.*[A-Z])(?=.*[a-z])[A-Za-z0-9]{8,128}" autocomplete="new-password"></div>
+   <div class="field"><label for="resetPasswordConfirm">新しいパスワード（確認）</label><input id="resetPasswordConfirm" type="password" minlength="8" maxlength="128" autocomplete="new-password"></div></div>
    <p id="resetError" role="alert"></p><button class="primary" id="resetSubmit">発行して変更</button>
  </form></dialog>
 `);
@@ -405,9 +405,11 @@ function configureAuth(setup) {
   $('#authSubmit').textContent = setup ? '管理者を登録して開始' : 'ログイン';
   $('#setupNameField').hidden = !setup; $('#setupName').required = setup;
   $('#setupConfirmField').hidden = !setup; $('#setupConfirm').required = setup;
-  $('#loginPassword').minLength = setup ? 12 : 1;
+  $('#loginPassword').minLength = setup ? 8 : 1;
+  if (setup) $('#loginPassword').pattern = '(?=.*[A-Z])(?=.*[a-z])[A-Za-z0-9]{8,128}';
+  else $('#loginPassword').removeAttribute('pattern');
   $('#loginPassword').autocomplete = setup ? 'new-password' : 'current-password';
-  $('#loginPassword').previousElementSibling.textContent = setup ? 'パスワード（12文字以上）' : 'パスワード';
+  $('#loginPassword').previousElementSibling.textContent = setup ? 'パスワード（8文字以上・半角英数字・大文字と小文字必須）' : 'パスワード';
 }
 (async () => {
   show('loginScreen');

@@ -8,7 +8,7 @@ import { createApplication } from './server.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const fixture = { id: 'test-manual', title: '共有テスト', category: 'テスト', description: '確認用', steps: ['手順1'], tags: ['登録'], keywords: ['テスト'], required: ['確認物'], related: [], images: [], owner: '担当者A', reviewed: '2026-10-18', nextReview: '2026-11-18', notice: '注意', danger: '', updated: '2026-10-18', changeNote: '初版' };
-const pass = 'test-password-1234';
+const pass = 'TestPass1234';
 
 function client(origin) {
   let cookie = '', csrf = '';
@@ -129,11 +129,15 @@ test('shared alpha: authorization, concurrency, migration, recovery and persiste
       assert.ok((await admin.request('backups')).files.length >= 3);
       const downloaded = await admin.request(`backups/${name}`); assert.equal(downloaded.subarray(0, 15).toString(), 'SQLite format 3');
     });
-    await t.test('password change revokes other sessions and allows whitespace passwords', async () => {
-      const newPassword = '  test-new-password  ';
+    await t.test('password change enforces the new policy and revokes other sessions', async () => {
+      for (const invalid of ['Abc1234', 'abcdefgh', 'ABCDEFGH', '12345678', 'Abcd123!', ' Abcd123', 'Ａbc12345', 'Abcd1234\n', 'A'.repeat(129)]) {
+        await editor.request('password', 'POST', { current: pass, password: invalid }, 400);
+      }
+      const newPassword = 'Abcdefgh';
       await editor.request('password', 'POST', { current: pass, password: newPassword });
       await otherEditor.request('manuals', 'GET', undefined, 401);
       await otherEditor.login('editor', newPassword);
+      await otherEditor.request('login', 'POST', { username: 'editor', password: 'abcdefgh' }, 401);
       await otherEditor.request('logout', 'POST', {});
       await otherEditor.request('manuals', 'GET', undefined, 401);
     });
@@ -193,7 +197,7 @@ test('four-level accounts, generated credentials and complete recovery', async t
     await t.test('generate distinct initial passwords; expose them only in the issuing response', async () => {
       for (const role of ['viewer', 'editor', 'manager']) {
         const issued = await admin.request('users', 'POST', { username: role, name: role, role }, 201);
-        assert.match(issued.generatedPassword, /^[A-Za-z0-9_-]{24}$/);
+        assert.match(issued.generatedPassword, /^(?=.*[A-Z])(?=.*[a-z])[A-Za-z0-9]{8}$/);
         secrets.push(issued.generatedPassword); clients[role] = client(origin);
         assert.equal((await clients[role].login(role, issued.generatedPassword)).role, role);
       }
@@ -235,7 +239,7 @@ test('four-level accounts, generated credentials and complete recovery', async t
     await t.test('admin can reissue passwords, revoke old logins and manually set a new password', async () => {
       const target = (await admin.request('users')).find(user => user.username === 'general-user');
       const issued = await admin.request(`users/${target.id}`, 'PATCH', { resetPassword: true });
-      assert.match(issued.generatedPassword, /^[A-Za-z0-9_-]{24}$/);
+      assert.match(issued.generatedPassword, /^(?=.*[A-Z])(?=.*[a-z])[A-Za-z0-9]{8}$/);
       assert.notEqual(issued.generatedPassword, secrets[0]);
       await clients.viewer.request('me', 'GET', undefined, 401);
       await clients.viewer.request('login', 'POST', { username: 'general-user', password: secrets[0] }, 401);
@@ -300,4 +304,34 @@ test('three-role DB migration preserves passwords, records and active sessions',
     assert.ok(readdirSync(join(dataDir, 'backups')).some(name => name.endsWith('before-role-migration.sqlite')));
     assert.equal(app.database.prepare('PRAGMA foreign_key_check').get(), undefined);
   } finally { await app.close(); }
+});
+
+test('eight-character policy applies to setup, creation and resets; old logins remain valid', async () => {
+  const dataDir = mkdtempSync(join(root, 'test-output', 'password-policy-'));
+  const app = createApplication({ dataDir });
+  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${app.server.address().port}`, admin = client(origin);
+  const invalid = ['Abc1234', 'abcdefgh', 'ABCDEFGH', '12345678', 'Abcd123!', 'Abcd1234\n', 'Abcd123 ', 'Ａbc12345', 'Aa' + '1'.repeat(127)];
+  try {
+    for (const value of invalid) await admin.request('setup', 'POST', { username: 'admin', name: 'Admin', password: value }, 400);
+    await admin.request('setup', 'POST', { username: 'admin', name: 'Admin', password: 'Abcd1234' }, 201);
+    await admin.login('admin', 'Abcd1234');
+    for (const value of invalid) await admin.request('users', 'POST', { username: 'staff', name: 'Staff', role: 'viewer', password: value }, 400);
+    await admin.request('users', 'POST', { username: 'staff', name: 'Staff', role: 'viewer', password: 'Aa' + '1'.repeat(126) }, 201);
+    const staff = (await admin.request('users')).find(user => user.username === 'staff');
+    for (const value of invalid) await admin.request(`users/${staff.id}`, 'PATCH', { password: value }, 400);
+    await admin.request(`users/${staff.id}`, 'PATCH', { password: 'Abcdefgh' });
+    const member = client(origin); await member.login('staff', 'Abcdefgh');
+    await member.request('login', 'POST', { username: 'staff', password: 'abcdefgh' }, 401);
+    await member.request('login', 'POST', { username: 'staff', password: 'ABCDEFGH' }, 401);
+  } finally { await app.close(); }
+  const legacyDir = mkdtempSync(join(root, 'test-output', 'legacy-password-'));
+  const legacy = createApplication({ dataDir: legacyDir, initialAdmin: { username: 'admin', password: ' old-password-1234 ' } });
+  await new Promise(resolve => legacy.server.listen(0, '127.0.0.1', resolve));
+  try {
+    const user = client(`http://127.0.0.1:${legacy.server.address().port}`);
+    await user.login('admin', ' old-password-1234 ');
+    await user.request('password', 'POST', { current: ' old-password-1234 ', password: 'Newpass8' });
+    await user.login('admin', 'Newpass8');
+  } finally { await legacy.close(); }
 });

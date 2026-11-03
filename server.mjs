@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
-import { randomBytes, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
+import { randomBytes, randomInt, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
 import { readFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,7 +30,18 @@ function text(value, label, max = 20000, required = false) {
   return value.trim();
 }
 function password(value) {
-  if (typeof value !== 'string' || value.length < 12 || value.length > 128) fail(400, 'パスワードは12〜128文字で入力してください。');
+  if (typeof value !== 'string' || value.length < 8 || value.length > 128 || /[^A-Za-z0-9]/.test(value) || !/[A-Z]/.test(value) || !/[a-z]/.test(value)) fail(400, 'パスワードは半角英数字8〜128文字で、大文字・小文字をそれぞれ1文字以上含めてください。');
+  return value;
+}
+function existingPassword(value) {
+  if (typeof value !== 'string' || value.length < 1 || value.length > 128) fail(400, 'パスワードを確認してください。');
+  return value;
+}
+function generatedPassword() {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let value;
+  do { value = Array.from({ length: 8 }, () => alphabet[randomInt(alphabet.length)]).join(''); }
+  while (!/[A-Z]/.test(value) || !/[a-z]/.test(value));
   return value;
 }
 function date(value, label) {
@@ -122,7 +133,9 @@ export function createApplication({ dataDir = join(ROOT, 'data'), secureCookies 
     const username = text(initialAdmin.username || 'admin', '初期管理者ID', 80, true);
     if (!/^[a-zA-Z0-9._-]+$/.test(username)) throw new Error('Invalid initial administrator username.');
     const name = text(initialAdmin.name || '管理者', '管理者名', 100, true);
-    const stored = passwordHash(password(initialAdmin.password));
+    // Keep existing deployment bootstrap credentials usable during policy upgrades.
+    if (typeof initialAdmin.password !== 'string' || initialAdmin.password.length < 8) fail(400, '初期管理者のパスワードは8文字以上にしてください。');
+    const stored = passwordHash(existingPassword(initialAdmin.password));
     transaction(() => {
       run('INSERT INTO users(id,username,name,password,role,created_at) VALUES(?,?,?,?,?,?)', randomBytes(12).toString('hex'), username, name, stored, 'admin', now());
       audit('初期管理者を環境設定から作成', name);
@@ -214,7 +227,7 @@ export function createApplication({ dataDir = join(ROOT, 'data'), secureCookies 
         const attempt = attempts.get(ip) || { count: 0, at: time };
         if (attempt.count >= 10) fail(429, 'ログイン試行が多いため、15分後に再度お試しください。');
         const username = text(body.username, 'ログインID', 80, true);
-        const supplied = password(body.password);
+        const supplied = existingPassword(body.password);
         const user = get('SELECT * FROM users WHERE username=?', username);
         const fallback = passwordHash('dummy-password-1234', '00000000000000000000000000000000');
         const valid = passwordOK(supplied, user?.password || fallback);
@@ -238,7 +251,7 @@ export function createApplication({ dataDir = join(ROOT, 'data'), secureCookies 
       if (req.method === 'POST' && path === '/api/logout') { run('DELETE FROM sessions WHERE token=?', session.token); res.setHeader('Set-Cookie', 'manual_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0'); send(200, { ok: true }); return; }
       if (req.method === 'POST' && path === '/api/password') {
         const user = get('SELECT password FROM users WHERE id=?', session.user_id);
-        if (!passwordOK(password(body.current), user.password)) fail(400, '現在のパスワードが違います。');
+        if (!passwordOK(existingPassword(body.current), user.password)) fail(400, '現在のパスワードが違います。');
         transaction(() => { run('UPDATE users SET password=? WHERE id=?', passwordHash(password(body.password)), session.user_id); run('DELETE FROM sessions WHERE user_id=? AND token<>?', session.user_id, session.token); audit('パスワードを変更', session.name); });
         send(200, { ok: true }); return;
       }
@@ -316,10 +329,10 @@ export function createApplication({ dataDir = join(ROOT, 'data'), secureCookies 
         const name = text(body.name, '氏名', 100, true);
         if (!ROLES.includes(body.role)) fail(400, '権限を確認してください。');
         if (get('SELECT id FROM users WHERE username=?', username)) fail(409, 'そのログインIDは使用されています。');
-        const generatedPassword = body.password === undefined || body.password === '' ? randomBytes(18).toString('base64url') : null;
-        const stored = passwordHash(password(generatedPassword || body.password));
+        const issuedPassword = body.password === undefined || body.password === '' ? generatedPassword() : null;
+        const stored = passwordHash(password(issuedPassword || body.password));
         transaction(() => { run('INSERT INTO users(id,username,name,password,role,created_at) VALUES(?,?,?,?,?,?)', randomBytes(12).toString('hex'), username, name, stored, body.role, now()); audit(`スタッフ追加: ${username} (${body.role})`, session.name); });
-        send(201, { ok: true, username, generatedPassword }); return;
+        send(201, { ok: true, username, generatedPassword: issuedPassword }); return;
       }
       const userPath = /^\/api\/users\/([a-f0-9]+)$/.exec(path);
       if (req.method === 'PATCH' && userPath) {
@@ -334,15 +347,15 @@ export function createApplication({ dataDir = join(ROOT, 'data'), secureCookies 
         if (user.id === session.user_id && (role !== 'admin' || !active)) fail(400, '自分の管理権限・利用状態は変更できません。');
         if (body.resetPassword !== undefined && typeof body.resetPassword !== 'boolean') fail(400, '再発行の指定が正しくありません。');
         if (body.resetPassword && body.password !== undefined) fail(400, '自動発行と任意のパスワードは同時に指定できません。');
-        const generatedPassword = body.resetPassword ? randomBytes(18).toString('base64url') : null;
-        const changingPassword = generatedPassword !== null || body.password !== undefined;
-        const stored = changingPassword ? passwordHash(password(generatedPassword || body.password)) : user.password;
+        const issuedPassword = body.resetPassword ? generatedPassword() : null;
+        const changingPassword = issuedPassword !== null || body.password !== undefined;
+        const stored = changingPassword ? passwordHash(password(issuedPassword || body.password)) : user.password;
         transaction(() => {
           run('UPDATE users SET username=?,name=?,role=?,active=?,password=? WHERE id=?', username, name, role, active, stored, user.id);
           run('DELETE FROM sessions WHERE user_id=? AND token<>?', user.id, user.id === session.user_id ? session.token : '');
           audit(`${changingPassword ? 'パスワード再設定' : 'スタッフ設定変更'}: ${user.username}${username !== user.username ? ` → ${username}` : ''}`, session.name);
         });
-        send(200, { ok: true, username, generatedPassword }); return;
+        send(200, { ok: true, username, generatedPassword: issuedPassword }); return;
       }
       if (req.method === 'POST' && path === '/api/system-restore') {
         admin();
