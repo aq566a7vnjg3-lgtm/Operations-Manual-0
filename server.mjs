@@ -4,10 +4,12 @@ import { randomBytes, scryptSync, timingSafeEqual, createHash } from 'node:crypt
 import { readFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ROLE_DEFINITIONS, PERMISSIONS, permissionsFor } from './permissions.mjs';
+import { restoreSystemBackup } from './restore.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const MAX_BODY = 40 * 1024 * 1024;
-const ROLES = ['viewer', 'editor', 'admin'];
+const ROLES = ROLE_DEFINITIONS.map(role => role.id);
 const now = () => new Date().toISOString();
 const localDay = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(new Date());
 const hashToken = value => createHash('sha256').update(value).digest('hex');
@@ -76,7 +78,7 @@ export function createApplication({ dataDir = join(ROOT, 'data'), secureCookies 
     PRAGMA busy_timeout=5000;
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
-      password TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('viewer','editor','admin')),
+      password TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('viewer','editor','manager','admin')),
       active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS sessions (
@@ -99,6 +101,23 @@ export function createApplication({ dataDir = join(ROOT, 'data'), secureCookies 
     catch (error) { database.exec('ROLLBACK'); throw error; }
   };
   const audit = (action, actor) => run('INSERT INTO audit(action,actor,at) VALUES(?,?,?)', action, actor, now());
+  if (!get("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").sql.includes("'manager'")) {
+    snapshot('before-role-migration');
+    database.exec('PRAGMA foreign_keys=OFF');
+    try {
+      transaction(() => database.exec(`
+        CREATE TABLE users_next (
+          id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
+          password TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('viewer','editor','manager','admin')),
+          active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL
+        );
+        INSERT INTO users_next SELECT id,username,name,password,role,active,created_at FROM users;
+        DROP TABLE users;
+        ALTER TABLE users_next RENAME TO users;
+      `));
+    } finally { database.exec('PRAGMA foreign_keys=ON'); }
+    if (get('PRAGMA foreign_key_check')) throw new Error('Account migration integrity check failed.');
+  }
   if (initialAdmin && !get('SELECT id FROM users LIMIT 1')) {
     const username = text(initialAdmin.username || 'admin', '初期管理者ID', 80, true);
     if (!/^[a-zA-Z0-9._-]+$/.test(username)) throw new Error('Invalid initial administrator username.');
@@ -161,7 +180,7 @@ export function createApplication({ dataDir = join(ROOT, 'data'), secureCookies 
       const path = url.pathname;
       if (req.method === 'GET' && path === '/health') {
         get('SELECT 1 AS ready');
-        send(200, { ok: true, version: '0.5-alpha.2', preview: previewMode }); return;
+        send(200, { ok: true, version: '0.6-alpha-accounts', preview: previewMode }); return;
       }
       if (req.method === 'GET' && assets[path]) {
         const [type, body] = assets[path]; res.writeHead(200, { 'Content-Type': type }); res.end(body); return;
@@ -212,8 +231,10 @@ export function createApplication({ dataDir = join(ROOT, 'data'), secureCookies 
       if (!session?.active) fail(401, 'ログインしてください。');
       if (req.method !== 'GET' && req.headers['x-csrf-token'] !== session.csrf) fail(403, '画面を再読み込みしてから操作してください。');
       const admin = () => { if (session.role !== 'admin') fail(403, '管理者のみ操作できます。'); };
-      const editor = () => { if (!['editor', 'admin'].includes(session.role)) fail(403, '編集権限がありません。'); };
-      if (req.method === 'GET' && path === '/api/me') { send(200, { id: session.user_id, name: session.name, username: session.username, role: session.role, csrf: session.csrf }); return; }
+      const permit = permission => { if (!permissionsFor(session.role).includes(permission)) fail(403, 'この操作の権限がありません。'); };
+      const editor = () => permit('edit');
+      if (req.method === 'GET' && path === '/api/me') { send(200, { id: session.user_id, name: session.name, username: session.username, role: session.role, permissions: permissionsFor(session.role), csrf: session.csrf }); return; }
+      if (req.method === 'GET' && path === '/api/roles') { send(200, { roles: ROLE_DEFINITIONS, permissions: PERMISSIONS }); return; }
       if (req.method === 'POST' && path === '/api/logout') { run('DELETE FROM sessions WHERE token=?', session.token); res.setHeader('Set-Cookie', 'manual_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0'); send(200, { ok: true }); return; }
       if (req.method === 'POST' && path === '/api/password') {
         const user = get('SELECT password FROM users WHERE id=?', session.user_id);
@@ -234,7 +255,7 @@ export function createApplication({ dataDir = join(ROOT, 'data'), secureCookies 
       }
       const manualPath = /^\/api\/manuals\/([a-zA-Z0-9_-]+)$/.exec(path);
       if (req.method === 'DELETE' && manualPath) {
-        editor(); transaction(() => {
+        permit('delete'); transaction(() => {
           const row = get('SELECT body,revision FROM manuals WHERE id=?', manualPath[1]);
           if (!row) fail(404, 'すでに削除されています。');
           if (body.revision !== row.revision) fail(409, '別のスタッフが更新しました。最新の内容を開き直してください。');
@@ -255,7 +276,7 @@ export function createApplication({ dataDir = join(ROOT, 'data'), secureCookies 
         send(200, { ...row, body: JSON.parse(row.body) }); return;
       }
       if (req.method === 'POST' && path === '/api/revert') {
-        admin(); const row = get('SELECT * FROM revisions WHERE id=?', Number(body.id));
+        permit('restore'); const row = get('SELECT * FROM revisions WHERE id=?', Number(body.id));
         if (!row) fail(404, '履歴がありません。');
         if (row.action === 'delete') fail(400, '削除する前の版を選んでください。');
         const manual = validateManual(JSON.parse(row.body));
@@ -268,11 +289,11 @@ export function createApplication({ dataDir = join(ROOT, 'data'), secureCookies 
         }); send(200, result); return;
       }
       if (req.method === 'GET' && path === '/api/export') {
-        admin(); res.setHeader('Content-Disposition', `attachment; filename="manuals-${localDay()}.json"`);
+        permit('transfer'); res.setHeader('Content-Disposition', `attachment; filename="manuals-${localDay()}.json"`);
         send(200, { app: '業務マニュアル検索', version: '0.5-alpha', exportedAt: now(), manuals: readManuals() }); return;
       }
       if (req.method === 'POST' && path === '/api/import') {
-        admin();
+        permit('transfer');
         if (!Array.isArray(body.manuals) || body.manuals.length > 2000) fail(400, 'マニュアル配列は2000件までです。');
         const items = body.manuals.map(validateManual);
         if (new Set(items.map(m => m.id)).size !== items.length) fail(400, '同じIDが重複しています。');
@@ -295,19 +316,39 @@ export function createApplication({ dataDir = join(ROOT, 'data'), secureCookies 
         const name = text(body.name, '氏名', 100, true);
         if (!ROLES.includes(body.role)) fail(400, '権限を確認してください。');
         if (get('SELECT id FROM users WHERE username=?', username)) fail(409, 'そのログインIDは使用されています。');
-        const stored = passwordHash(password(body.password));
+        const generatedPassword = body.password === undefined || body.password === '' ? randomBytes(18).toString('base64url') : null;
+        const stored = passwordHash(password(generatedPassword || body.password));
         transaction(() => { run('INSERT INTO users(id,username,name,password,role,created_at) VALUES(?,?,?,?,?,?)', randomBytes(12).toString('hex'), username, name, stored, body.role, now()); audit(`スタッフ追加: ${username} (${body.role})`, session.name); });
-        send(201, { ok: true }); return;
+        send(201, { ok: true, username, generatedPassword }); return;
       }
       const userPath = /^\/api\/users\/([a-f0-9]+)$/.exec(path);
       if (req.method === 'PATCH' && userPath) {
         admin(); const user = get('SELECT * FROM users WHERE id=?', userPath[1]);
         if (!user) fail(404, 'スタッフが見つかりません。');
-        if (!ROLES.includes(body.role) || ![0, 1].includes(body.active)) fail(400, '権限・利用状態を確認してください。');
-        if (user.id === session.user_id && (body.role !== 'admin' || !body.active)) fail(400, '自分の管理権限・利用状態は変更できません。');
-        const stored = body.password ? passwordHash(password(body.password)) : user.password;
-        transaction(() => { run('UPDATE users SET role=?,active=?,password=? WHERE id=?', body.role, body.active, stored, user.id); run('DELETE FROM sessions WHERE user_id=?', user.id); audit(`スタッフ設定変更: ${user.username}`, session.name); });
-        send(200, { ok: true }); return;
+        const role = body.role ?? user.role, active = body.active ?? user.active;
+        const username = text(body.username ?? user.username, 'ログインID', 80, true);
+        const name = text(body.name ?? user.name, '氏名', 100, true);
+        if (!/^[a-zA-Z0-9._-]+$/.test(username)) fail(400, 'ログインIDは半角英数字で入力してください。');
+        if (!ROLES.includes(role) || ![0, 1].includes(active)) fail(400, '権限・利用状態を確認してください。');
+        if (get('SELECT id FROM users WHERE username=? AND id<>?', username, user.id)) fail(409, 'そのログインIDは使用されています。');
+        if (user.id === session.user_id && (role !== 'admin' || !active)) fail(400, '自分の管理権限・利用状態は変更できません。');
+        if (body.resetPassword !== undefined && typeof body.resetPassword !== 'boolean') fail(400, '再発行の指定が正しくありません。');
+        if (body.resetPassword && body.password !== undefined) fail(400, '自動発行と任意のパスワードは同時に指定できません。');
+        const generatedPassword = body.resetPassword ? randomBytes(18).toString('base64url') : null;
+        const changingPassword = generatedPassword !== null || body.password !== undefined;
+        const stored = changingPassword ? passwordHash(password(generatedPassword || body.password)) : user.password;
+        transaction(() => {
+          run('UPDATE users SET username=?,name=?,role=?,active=?,password=? WHERE id=?', username, name, role, active, stored, user.id);
+          run('DELETE FROM sessions WHERE user_id=? AND token<>?', user.id, user.id === session.user_id ? session.token : '');
+          audit(`${changingPassword ? 'パスワード再設定' : 'スタッフ設定変更'}: ${user.username}${username !== user.username ? ` → ${username}` : ''}`, session.name);
+        });
+        send(200, { ok: true, username, generatedPassword }); return;
+      }
+      if (req.method === 'POST' && path === '/api/system-restore') {
+        admin();
+        if (body.confirm !== true) fail(400, '全体復元の明示的な確認が必要です。');
+        const result = restoreSystemBackup({ database, dataDir, encoded: body.sqlite, session, validateManual, snapshot });
+        send(200, result); return;
       }
       if (req.method === 'GET' && path === '/api/backups') {
         admin(); send(200, { error: backupError, files: readdirSync(backupDir).filter(n => n.endsWith('.sqlite')).sort().reverse().map(name => ({ name, bytes: statSync(join(backupDir, name)).size })) }); return;

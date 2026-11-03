@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, readdirSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
@@ -14,7 +14,7 @@ function client(origin) {
   let cookie = '', csrf = '';
   return {
     async request(path, method = 'GET', data, expected = 200, extraHeaders = {}) {
-      const response = await fetch(`${origin}/api/${path}`, { method, headers: { Cookie: cookie, Origin: origin, 'Content-Type': 'application/json', 'X-CSRF-Token': csrf, ...extraHeaders }, body: data === undefined ? undefined : JSON.stringify(data) });
+      const response = await fetch(`${origin}/api/${path}`, { method, headers: { Connection: 'close', Cookie: cookie, Origin: origin, 'Content-Type': 'application/json', 'X-CSRF-Token': csrf, ...extraHeaders }, body: data === undefined ? undefined : JSON.stringify(data) });
       if (response.headers.get('set-cookie')) cookie = response.headers.get('set-cookie').split(';')[0];
       const result = response.headers.get('content-type')?.includes('json') ? await response.json() : Buffer.from(await response.arrayBuffer());
       assert.equal(response.status, expected, `${method} ${path}: ${JSON.stringify(result)}`);
@@ -67,7 +67,7 @@ test('shared alpha: authorization, concurrency, migration, recovery and persiste
     });
     await t.test('stale updates and deletions cannot overwrite another editor', async () => {
       await otherEditor.request('manuals', 'PUT', { ...fixture, revision: 1 }, 409);
-      await editor.request('manuals/test-manual', 'DELETE', { revision: 1 }, 409);
+      await admin.request('manuals/test-manual', 'DELETE', { revision: 1 }, 409);
       assert.equal((await viewer.request('manuals'))[0].revision, 2);
     });
     await t.test('invalid import is rejected before changing data', async () => {
@@ -179,5 +179,125 @@ test('public deployment rejects setup even through a loopback proxy', async () =
     assert.deepEqual(await anonymous.request('status'), { initialized: false, localSetup: false });
     await anonymous.request('setup', 'POST', { username: 'attacker', name: 'test', password: pass }, 403);
     assert.equal(app.database.prepare('SELECT COUNT(*) AS n FROM users').get().n, 0);
+  } finally { await app.close(); }
+});
+
+test('four-level accounts, generated credentials and complete recovery', async t => {
+  const dataDir = mkdtempSync(join(root, 'test-output', 'accounts-'));
+  const app = createApplication({ dataDir, initialAdmin: { username: 'admin', name: '管理者', password: pass } });
+  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${app.server.address().port}`, admin = client(origin);
+  const clients = {}, secrets = [];
+  try {
+    await admin.login('admin');
+    await t.test('generate distinct initial passwords; expose them only in the issuing response', async () => {
+      for (const role of ['viewer', 'editor', 'manager']) {
+        const issued = await admin.request('users', 'POST', { username: role, name: role, role }, 201);
+        assert.match(issued.generatedPassword, /^[A-Za-z0-9_-]{24}$/);
+        secrets.push(issued.generatedPassword); clients[role] = client(origin);
+        assert.equal((await clients[role].login(role, issued.generatedPassword)).role, role);
+      }
+      assert.equal(new Set(secrets).size, 3);
+      const users = await admin.request('users');
+      assert.ok(users.every(user => !('password' in user) && !('generatedPassword' in user)));
+      for (const secret of secrets) {
+        assert.ok(!JSON.stringify(app.database.prepare('SELECT * FROM users').all()).includes(secret));
+        assert.ok(!JSON.stringify(await admin.request('audit')).includes(secret));
+      }
+    });
+    await t.test('viewer and editor cannot delete or manage accounts; manager cannot access system backups', async () => {
+      const { roles } = await clients.viewer.request('roles'); assert.equal(roles.length, 4);
+      await clients.viewer.request('manuals', 'PUT', fixture, 403);
+      await clients.editor.request('manuals', 'PUT', fixture);
+      for (const role of ['viewer','editor']) {
+        await clients[role].request('manuals/test-manual', 'DELETE', { revision: 1 }, 403);
+        await clients[role].request('users', 'POST', { username: 'escalate', name: 'x', role: 'admin' }, 403);
+        await clients[role].request('import', 'POST', { manuals: [] }, 403);
+      }
+      const manager = clients.manager;
+      for (const path of ['users','backups','audit']) await manager.request(path, 'GET', undefined, 403);
+      await manager.request('system-restore', 'POST', { confirm: true, sqlite: 'bad' }, 403);
+      await manager.request('export');
+      const history = await manager.request('history?manual=test-manual');
+      await manager.request('manuals/test-manual', 'DELETE', { revision: 1 });
+      await manager.request('revert', 'POST', { id: history[0].id, expectedRevision: 2 });
+      assert.equal((await manager.request('manuals'))[0].revision, 3);
+    });
+    await t.test('ID changes revoke other sessions and reject duplicate IDs', async () => {
+      const target = (await admin.request('users')).find(user => user.username === 'viewer');
+      await admin.request(`users/${target.id}`, 'PATCH', { username: 'general-user', name: '一般スタッフ' });
+      await clients.viewer.request('me', 'GET', undefined, 401);
+      await clients.viewer.request('login', 'POST', { username: 'viewer', password: secrets[0] }, 401);
+      await clients.viewer.login('general-user', secrets[0]);
+      await admin.request(`users/${target.id}`, 'PATCH', { username: 'editor' }, 409);
+      await admin.request(`users/${target.id}`, 'PATCH', { username: '<script>' }, 400);
+    });
+    await t.test('admin can reissue passwords, revoke old logins and manually set a new password', async () => {
+      const target = (await admin.request('users')).find(user => user.username === 'general-user');
+      const issued = await admin.request(`users/${target.id}`, 'PATCH', { resetPassword: true });
+      assert.match(issued.generatedPassword, /^[A-Za-z0-9_-]{24}$/);
+      assert.notEqual(issued.generatedPassword, secrets[0]);
+      await clients.viewer.request('me', 'GET', undefined, 401);
+      await clients.viewer.request('login', 'POST', { username: 'general-user', password: secrets[0] }, 401);
+      await clients.viewer.login('general-user', issued.generatedPassword);
+      await clients.manager.request(`users/${target.id}`, 'PATCH', { resetPassword: true }, 403);
+      await admin.request(`users/${target.id}`, 'PATCH', { resetPassword: true, password: pass }, 400);
+      await admin.request(`users/${target.id}`, 'PATCH', { password: '' }, 400);
+      const result = await admin.request(`users/${target.id}`, 'PATCH', { password: pass });
+      assert.equal(result.generatedPassword, null);
+      await clients.viewer.login('general-user', pass);
+    });
+    await t.test('own ID can be changed without losing the active admin session', async () => {
+      const own = await admin.request('me');
+      await admin.request(`users/${own.id}`, 'PATCH', { username: 'owner-new' });
+      assert.equal((await admin.request('me')).username, 'owner-new');
+      await admin.request(`users/${own.id}`, 'PATCH', { role: 'manager' }, 400);
+      await admin.request(`users/${own.id}`, 'PATCH', { active: 0 }, 400);
+    });
+    await t.test('system recovery preserves manual content, password hashes, IDs, roles and revisions', async () => {
+      const expectedManuals = await admin.request('manuals'), expectedUsers = await admin.request('users');
+      const expectedPasswords = app.database.prepare('SELECT id,password FROM users ORDER BY id').all();
+      const expectedRevisions = app.database.prepare('SELECT * FROM revisions ORDER BY id').all();
+      const { name } = await admin.request('backups', 'POST', {}, 201);
+      const bytes = readFileSync(join(dataDir, 'backups', name));
+      await admin.request('users', 'POST', { username: 'temporary', name: '一時的', role: 'viewer' }, 201);
+      await admin.request('manuals/test-manual', 'DELETE', { revision: 3 });
+      await admin.request('system-restore', 'POST', { sqlite: bytes.toString('base64') }, 400);
+      await admin.request('system-restore', 'POST', { confirm: true, sqlite: bytes.toString('base64') });
+      assert.deepEqual(await admin.request('manuals'), expectedManuals);
+      assert.deepEqual(await admin.request('users'), expectedUsers);
+      assert.deepEqual(app.database.prepare('SELECT id,password FROM users ORDER BY id').all(), expectedPasswords);
+      assert.deepEqual(app.database.prepare('SELECT * FROM revisions ORDER BY id').all(), expectedRevisions);
+      await clients.viewer.request('me', 'GET', undefined, 401);
+      assert.equal((await client(origin).login('owner-new')).role, 'admin');
+      await admin.request('system-restore', 'POST', { confirm: true, sqlite: Buffer.from('not-sqlite').toString('base64') }, 400);
+      assert.deepEqual(await admin.request('manuals'), expectedManuals);
+    });
+  } finally { await app.close(); }
+});
+
+test('three-role DB migration preserves passwords, records and active sessions', async () => {
+  const dataDir = mkdtempSync(join(root, 'test-output', 'migration-'));
+  let app = createApplication({ dataDir, initialAdmin: { username: 'admin', password: pass } });
+  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  const port = app.server.address().port, original = client(`http://127.0.0.1:${port}`);
+  await original.login('admin'); await original.request('manuals', 'PUT', fixture);
+  const hashes = app.database.prepare('SELECT id,password FROM users').all();
+  await app.close();
+  const old = new DatabaseSync(join(dataDir, 'manuals.sqlite'));
+  old.exec(`PRAGMA foreign_keys=OFF; BEGIN;
+    CREATE TABLE users_old_format (id TEXT PRIMARY KEY,username TEXT UNIQUE NOT NULL,name TEXT NOT NULL,password TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('viewer','editor','admin')),active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL);
+    INSERT INTO users_old_format SELECT * FROM users;
+    DROP TABLE users; ALTER TABLE users_old_format RENAME TO users; COMMIT;`);
+  old.close();
+  app = createApplication({ dataDir });
+  await new Promise(resolve => app.server.listen(port, '127.0.0.1', resolve));
+  try {
+    assert.equal((await original.request('me')).role, 'admin');
+    assert.deepEqual(app.database.prepare('SELECT id,password FROM users').all(), hashes);
+    assert.equal((await original.request('manuals'))[0].id, fixture.id);
+    await original.request('users', 'POST', { username: 'manager', name: '資料管理者', role: 'manager' }, 201);
+    assert.ok(readdirSync(join(dataDir, 'backups')).some(name => name.endsWith('before-role-migration.sqlite')));
+    assert.equal(app.database.prepare('PRAGMA foreign_key_check').get(), undefined);
   } finally { await app.close(); }
 });

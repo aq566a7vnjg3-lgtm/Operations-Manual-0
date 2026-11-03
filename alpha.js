@@ -2,10 +2,12 @@
 
 let staff = null, csrfToken = '', editingRevision = 0, formDirty = false, saving = false;
 let imageGeneration = 0, pendingImages = 0, syncTimer = null, historyManual = '';
-const roleNames = { viewer: '閲覧', editor: '編集', admin: '管理者' };
+const roleNames = { viewer: '一般ユーザー', editor: '編集担当', manager: '資料管理者', admin: 'システム管理者' };
+let roleCatalog = null, resetTarget = null;
 const actionNames = { create: '新規', save: '更新', delete: '削除', restore: '版の復元', import: '一括復元' };
-const canEdit = () => staff && staff.role !== 'viewer';
-const canAdmin = () => staff?.role === 'admin';
+const hasPermission = name => staff?.permissions?.includes(name) || false;
+const canEdit = () => hasPermission('edit');
+const canAdmin = () => hasPermission('users');
 const formatTime = value => value ? new Date(value).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '';
 
 document.body.insertAdjacentHTML('afterbegin', `
@@ -14,7 +16,7 @@ document.body.insertAdjacentHTML('afterbegin', `
    <span id="syncState" role="status"></span><div class="spacer"></div>
    <span id="staffName"></span>
    <button type="button" class="secondary" id="openHistory">更新履歴</button>
-   <button type="button" class="secondary" id="openTeam" hidden>スタッフ・バックアップ</button>
+   <button type="button" class="secondary" id="openTeam" hidden>アカウント・権限</button>
    <button type="button" class="secondary" id="changePassword">パスワード変更</button>
    <button type="button" class="secondary" id="logout">ログアウト</button>
  </div>
@@ -35,13 +37,14 @@ document.body.insertAdjacentHTML('afterbegin', `
    <div id="historyList"></div>
  </section>
  <section id="teamScreen" class="screen workspace-screen">
-   <div class="workspace-heading"><button class="secondary" id="teamBack">← ホーム</button><h1>スタッフ・バックアップ</h1></div>
+   <div class="workspace-heading"><button class="secondary" id="teamBack">← ホーム</button><h1>アカウント・権限</h1></div>
+   <section class="workspace-section"><h2>権限の段階</h2><div id="roleMatrix" class="role-matrix"></div></section>
    <section class="workspace-section"><h2>スタッフ</h2><div id="teamList"></div>
    <h3>スタッフ追加</h3><form id="addStaffForm" class="staff-form">
      <div class="field"><label for="newStaffName">氏名</label><input id="newStaffName" required maxlength="100"></div>
      <div class="field"><label for="newStaffId">ログインID</label><input id="newStaffId" required pattern="[A-Za-z0-9._-]+" maxlength="80" autocomplete="off" autocapitalize="none"></div>
-     <div class="field"><label for="newStaffRole">権限</label><select id="newStaffRole"><option value="viewer">閲覧</option><option value="editor">編集</option><option value="admin">管理者</option></select></div>
-     <div class="field"><label for="newStaffPassword">初期パスワード（12文字以上）</label><input id="newStaffPassword" type="password" required minlength="12" maxlength="128" autocomplete="new-password"></div>
+     <div class="field"><label for="newStaffRole">権限</label><select id="newStaffRole"></select></div>
+     <div class="field"><label>初期パスワード</label><span class="generated-mode">自動発行</span></div>
      <button class="primary" type="submit">追加</button>
    </form></section>
    <section class="workspace-section"><div class="workspace-heading"><h2>バックアップ</h2><button class="secondary" id="createBackup">今すぐ作成</button></div>
@@ -55,6 +58,19 @@ document.body.insertAdjacentHTML('afterbegin', `
    <div class="field"><label for="nextPassword">新しいパスワード（12文字以上）</label><input id="nextPassword" type="password" required minlength="12" maxlength="128" autocomplete="new-password"></div>
    <div class="field"><label for="nextPasswordConfirm">新しいパスワード（確認）</label><input id="nextPasswordConfirm" type="password" required minlength="12" maxlength="128" autocomplete="new-password"></div>
    <p id="passwordError" role="alert"></p><button class="primary">変更</button>
+ </form></dialog>
+ <dialog id="issuedDialog"><div class="dialog-heading"><h2>発行したログイン情報</h2><button class="secondary" id="closeIssued" aria-label="閉じる">×</button></div>
+   <div class="field"><label for="issuedUsername">ログインID</label><input id="issuedUsername" readonly autocomplete="off"></div>
+   <div class="field"><label for="issuedPassword">発行したパスワード</label><input id="issuedPassword" type="password" readonly autocomplete="off"></div>
+   <div class="credential-actions"><button class="secondary" id="toggleIssued">表示</button><button class="secondary" id="copyIssued">コピー</button><span id="issuedCopyStatus" role="status"></span></div>
+   <p class="small">閉じた後は再表示できません。本人への受け渡しに必要な場合は、閉じる前に控えてください。</p>
+ </dialog>
+ <dialog id="resetDialog"><form id="resetForm"><div class="dialog-heading"><h2>パスワード再設定</h2><button type="button" class="secondary" id="closeReset" aria-label="閉じる">×</button></div>
+   <p id="resetPerson"></p>
+   <div class="field"><label for="resetMode">発行方法</label><select id="resetMode"><option value="auto">自動発行</option><option value="manual">任意のパスワードを指定</option></select></div>
+   <div id="manualResetFields" hidden><div class="field"><label for="resetPassword">新しいパスワード（12文字以上）</label><input id="resetPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password"></div>
+   <div class="field"><label for="resetPasswordConfirm">新しいパスワード（確認）</label><input id="resetPasswordConfirm" type="password" minlength="12" maxlength="128" autocomplete="new-password"></div></div>
+   <p id="resetError" role="alert"></p><button class="primary" id="resetSubmit">発行して変更</button>
  </form></dialog>
 `);
 
@@ -112,6 +128,7 @@ editManual = function (id) {
   imageGeneration++; originalEditManual(id); editingRevision = manual.revision;
   for (const [field, key] of [['fOwner', 'owner'], ['fReviewed', 'reviewed'], ['fNextReview', 'nextReview']]) $(`#${field}`).value = manual[key] || '';
   $('#fChangeNote').value = ''; formDirty = false;
+  $('#deleteManual').hidden = !hasPermission('delete');
 };
 const originalFormToManual = formToManual;
 formToManual = function (forceId = null) {
@@ -140,6 +157,7 @@ $('#duplicateManual').onclick = guard(async () => {
   await dbPut(value); formDirty = false; await loadManuals(); editManual(value.id); message('複製しました。');
 });
 $('#deleteManual').onclick = guard(async () => {
+  if (!hasPermission('delete')) return;
   if (!currentEditId || saving || !confirm('このマニュアルを削除しますか？管理者は更新履歴から復元できます。')) return;
   await dbDel(currentEditId); formDirty = false; await loadManuals(); clearForm(); message('削除しました。');
 });
@@ -185,7 +203,7 @@ function downloadJson(data, name) {
 }
 $('#exportJson').onclick = guard(async () => downloadJson(await api('export'), `業務マニュアル_backup_${today()}.json`));
 importJson = async function (file) {
-  if (!file || !canAdmin()) return;
+  if (!file || !hasPermission('transfer')) return;
   try {
     if (file.size > 38 * 1024 * 1024) throw new Error('JSONファイルは38MBまでです。');
     const data = JSON.parse(await file.text()); const items = Array.isArray(data) ? data : data?.manuals;
@@ -220,7 +238,7 @@ async function previewRevision(id) {
     <h3>必要なもの</h3><ul>${manual.required.map(x => `<li>${esc(x)}</li>`).join('')}</ul>
     <h3>手順</h3><ol>${manual.steps.map((x, i) => `<li>${esc(x)}${imageFigures(manual, i + 1)}</li>`).join('')}</ol>${imageFigures(manual, 0)}
     <h3>注意・重要事項</h3><p class="preserve-lines">${esc(manual.notice)}\n${esc(manual.danger)}</p>`;
-  $('#restoreRevision').hidden = !canAdmin() || row.action === 'delete';
+  $('#restoreRevision').hidden = !hasPermission('restore') || row.action === 'delete';
   $('#restoreRevision').onclick = guard(async () => {
     if (!confirm(`「${manual.title}」を第${row.revision}版の内容へ戻しますか？`)) return;
     await api('revert', { method: 'POST', data: { id, expectedRevision } });
@@ -237,20 +255,31 @@ async function loadTeam() {
   const list = $('#teamList'); list.innerHTML = '';
   for (const user of users) {
     const row = document.createElement('div'); row.className = 'staff-row';
-    const identity = document.createElement('div'); identity.innerHTML = `<strong>${esc(user.name)}</strong><div class="small">${esc(user.username)}</div>`;
+    const identity = document.createElement('label'); identity.className = 'field'; identity.append('氏名');
+    const name = document.createElement('input'); name.value = user.name; name.maxLength = 100; name.setAttribute('aria-label', `${user.name}の氏名`); identity.append(name);
+    const idField = document.createElement('label'); idField.className = 'field'; idField.append('ログインID');
+    const username = document.createElement('input'); username.value = user.username; username.maxLength = 80; username.pattern = '[A-Za-z0-9._-]+'; username.setAttribute('aria-label', `${user.name}のログインID`); idField.append(username);
     const role = document.createElement('select'); role.setAttribute('aria-label', `${user.name}の権限`);
     for (const [value, label] of Object.entries(roleNames)) { const option = document.createElement('option'); option.value = value; option.textContent = label; role.append(option); } role.value = user.role;
     const activeLabel = document.createElement('label'); activeLabel.className = 'active-toggle';
     const active = document.createElement('input'); active.type = 'checkbox'; active.checked = !!user.active; activeLabel.append(active, '利用中');
     const save = document.createElement('button'); save.className = 'secondary'; save.textContent = '変更を保存';
-    save.onclick = guard(async () => { await api(`users/${user.id}`, { method: 'PATCH', data: { role: role.value, active: active.checked ? 1 : 0 } }); await loadTeam(); message('スタッフ設定を更新しました。'); });
-    const reset = document.createElement('button'); reset.className = 'secondary'; reset.textContent = 'パスワード再設定';
-    reset.onclick = guard(async () => {
-      const value = prompt(`${user.name}の新しいパスワード（12文字以上）`); if (value === null) return;
-      await api(`users/${user.id}`, { method: 'PATCH', data: { role: user.role, active: user.active, password: value } }); message('パスワードを再設定しました。本人にお伝えください。');
+    save.onclick = guard(async () => {
+      if (!username.reportValidity() || !name.value.trim()) return;
+      save.disabled = true;
+      try {
+        await api(`users/${user.id}`, { method: 'PATCH', data: { username: username.value, name: name.value, role: role.value, active: active.checked ? 1 : 0 } });
+        if (user.id === staff.id) { staff = await api('me'); $('#staffName').textContent = `${staff.name}（${roleNames[staff.role]}）`; }
+        await loadTeam(); message('アカウントを更新しました。変更したスタッフは再ログインしてください。');
+      } finally { save.disabled = false; }
     });
-    if (user.id === staff.id) { role.disabled = true; active.disabled = true; save.disabled = true; reset.hidden = true; }
-    row.append(identity, role, activeLabel, save, reset); list.append(row);
+    const reset = document.createElement('button'); reset.className = 'secondary'; reset.textContent = 'パスワード再設定';
+    reset.onclick = () => {
+      resetTarget = user; $('#resetForm').reset(); $('#resetPerson').textContent = `${user.name}（${user.username}）`;
+      $('#resetError').textContent = ''; updateResetMode(); $('#resetDialog').showModal();
+    };
+    if (user.id === staff.id) { role.disabled = true; active.disabled = true; }
+    row.append(identity, idField, role, activeLabel, save, reset); list.append(row);
   }
   $('#backupHealth').textContent = backups.error || '自動保存：起動時・稼働中は毎日。全件復元・旧版復元の直前にも退避します。';
   $('#backupHealth').classList.toggle('overdue', !!backups.error);
@@ -262,9 +291,47 @@ $('#teamBack').onclick = () => show('homeScreen');
 $('#createBackup').onclick = guard(async () => { await api('backups', { method: 'POST', data: {} }); await loadTeam(); message('バックアップを作成しました。'); });
 $('#addStaffForm').onsubmit = guard(async event => {
   event.preventDefault();
-  await api('users', { method: 'POST', data: { name: $('#newStaffName').value, username: $('#newStaffId').value, role: $('#newStaffRole').value, password: $('#newStaffPassword').value } });
-  $('#addStaffForm').reset(); await loadTeam(); message('スタッフを追加しました。');
+  const submit = event.target.querySelector('button[type="submit"]'); submit.disabled = true;
+  try {
+    const issued = await api('users', { method: 'POST', data: { name: $('#newStaffName').value, username: $('#newStaffId').value, role: $('#newStaffRole').value } });
+    $('#addStaffForm').reset(); showIssued(issued); await loadTeam(); message('アカウントと初期パスワードを発行しました。');
+  } finally { submit.disabled = false; }
 });
+function showIssued(issued) {
+  $('#issuedUsername').value = issued.username; $('#issuedPassword').value = issued.generatedPassword;
+  $('#issuedPassword').type = 'password'; $('#toggleIssued').textContent = '表示'; $('#issuedCopyStatus').textContent = '';
+  $('#issuedDialog').showModal();
+}
+function clearIssued() { $('#issuedUsername').value = ''; $('#issuedPassword').value = ''; }
+$('#closeIssued').onclick = () => { clearIssued(); $('#issuedDialog').close(); };
+$('#issuedDialog').addEventListener('cancel', clearIssued);
+$('#issuedDialog').addEventListener('close', clearIssued);
+$('#toggleIssued').onclick = () => {
+  const visible = $('#issuedPassword').type === 'text'; $('#issuedPassword').type = visible ? 'password' : 'text'; $('#toggleIssued').textContent = visible ? '表示' : '非表示';
+};
+$('#copyIssued').onclick = async () => {
+  try { await navigator.clipboard.writeText($('#issuedPassword').value); $('#issuedCopyStatus').textContent = 'コピーしました'; }
+  catch { $('#issuedPassword').focus(); $('#issuedPassword').select(); $('#issuedCopyStatus').textContent = '選択した文字列をコピーしてください'; }
+};
+function updateResetMode() {
+  const manual = $('#resetMode').value === 'manual'; $('#manualResetFields').hidden = !manual;
+  for (const selector of ['#resetPassword', '#resetPasswordConfirm']) { $(selector).required = manual; $(selector).disabled = !manual; }
+  $('#resetSubmit').textContent = manual ? '変更' : '発行して変更';
+}
+$('#resetMode').onchange = updateResetMode;
+$('#closeReset').onclick = () => $('#resetDialog').close();
+$('#resetDialog').addEventListener('close', () => { $('#resetForm').reset(); resetTarget = null; });
+$('#resetForm').onsubmit = async event => {
+  event.preventDefault(); $('#resetSubmit').disabled = true; $('#resetError').textContent = '';
+  try {
+    const manual = $('#resetMode').value === 'manual';
+    if (manual && $('#resetPassword').value !== $('#resetPasswordConfirm').value) throw new Error('確認用パスワードが一致していません。');
+    const issued = await api(`users/${resetTarget.id}`, { method: 'PATCH', data: manual ? { password: $('#resetPassword').value } : { resetPassword: true } });
+    $('#resetDialog').close(); if (issued.generatedPassword) showIssued(issued);
+    message('パスワードを再設定しました。他のログイン中のセッションは無効になりました。'); await loadTeam();
+  } catch (error) { $('#resetError').textContent = error.message; }
+  finally { $('#resetSubmit').disabled = false; }
+};
 $('#changePassword').onclick = () => { $('#passwordForm').reset(); $('#passwordError').textContent = ''; $('#passwordDialog').showModal(); };
 $('#closePassword').onclick = () => $('#passwordDialog').close();
 $('#passwordForm').onsubmit = async event => {
@@ -277,6 +344,7 @@ $('#passwordForm').onsubmit = async event => {
 };
 
 function loggedOut() {
+  clearIssued(); $('#resetForm').reset();
   clearInterval(syncTimer); syncTimer = null; staff = null; csrfToken = ''; imageGeneration++; formDirty = false;
   manuals = []; editImages = []; currentEditId = ''; currentDetailId = ''; editingRevision = 0;
   $('#manualForm').reset();
@@ -293,7 +361,11 @@ async function signedIn() {
   $('#sharedBar').hidden = false;
   $('#staffName').textContent = `${staff.name}（${roleNames[staff.role]}）`;
   $('#openAdmin').hidden = !canEdit(); $('#openTeam').hidden = !canAdmin();
-  $('#exportJson').hidden = !canAdmin(); document.querySelector('label[for="importJson"]').hidden = !canAdmin();
+  $('#exportJson').hidden = !hasPermission('transfer'); document.querySelector('label[for="importJson"]').hidden = !hasPermission('transfer');
+  $('#deleteManual').hidden = !hasPermission('delete');
+  roleCatalog = await api('roles');
+  $('#newStaffRole').innerHTML = roleCatalog.roles.map(role => `<option value="${esc(role.id)}">${esc(role.name)}</option>`).join('');
+  $('#roleMatrix').innerHTML = `<table><thead><tr><th scope="col">権限</th>${roleCatalog.permissions.map(([,label]) => `<th scope="col">${esc(label)}</th>`).join('')}</tr></thead><tbody>${roleCatalog.roles.map(role => `<tr><th scope="row">${esc(role.name)}</th>${roleCatalog.permissions.map(([key]) => `<td>${role.permissions.includes(key) ? '○' : '―'}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
   await loadManuals(); clearForm(); show('homeScreen');
   $('#authForm').reset(); message(manuals.length ? '' : 'マニュアルはまだありません。管理者・編集担当者が登録できます。');
   clearInterval(syncTimer);
