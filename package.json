@@ -1,0 +1,12 @@
+{
+  "name": "business-manual-render-alpha",
+  "version": "0.5.0-alpha.2",
+  "private": true,
+  "type": "module",
+  "engines": { "node": "24.x" },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test.mjs",
+    "check": "node --check server.mjs"
+  }
+}

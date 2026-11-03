@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>業務マニュアル検索 v0.4</title>
+<style>
+:root{
+  --bg:#fff;--text:#202124;--muted:#5f6368;--line:#dadce0;--chip:#f1f3f4;
+  --blue:#1a73e8;--blue-soft:#e8f0fe;--warn:#fff8e1;--danger:#fce8e6;--red:#b3261e;
+}
+*{box-sizing:border-box}
+body{margin:0;color:var(--text);background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Sans","Yu Gothic",Meiryo,sans-serif}
+button,input,textarea,select{font:inherit}
+button{cursor:pointer}
+.screen{display:none}.screen.active{display:block}
+.primary{border:0;background:var(--blue);color:#fff;border-radius:10px;padding:10px 16px;font-weight:600}
+.secondary{border:1px solid var(--line);background:#fff;border-radius:10px;padding:10px 14px}
+.danger-btn{border:1px solid #f2b8b5;background:#fff;color:var(--red);border-radius:10px;padding:10px 14px}
+.small{font-size:12px;color:var(--muted)}
+.row{display:flex;align-items:center;gap:10px}.spacer{flex:1}
+
+/* HOME */
+.home{min-height:100vh;padding:env(safe-area-inset-top) 20px env(safe-area-inset-bottom)}
+.home-top{max-width:1100px;margin:0 auto;padding-top:12px;display:flex;justify-content:flex-end}
+.home-inner{max-width:820px;margin:0 auto;padding-top:10vh;text-align:center}
+.brand{font-size:clamp(38px,8vw,72px);font-weight:600;letter-spacing:-2px;margin-bottom:32px}
+.brand span{color:var(--blue)}
+.searchbar{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:28px;padding:0 16px;height:56px;box-shadow:0 1px 6px rgba(32,33,36,.15);background:#fff}
+.searchbar input{flex:1;border:0;outline:0;font-size:18px;min-width:0;background:transparent}
+.search-icon{font-size:22px;color:var(--muted)}
+.quick{display:flex;justify-content:center;flex-wrap:wrap;gap:10px;margin-top:22px}
+.quick button{border:0;border-radius:10px;background:var(--chip);padding:10px 15px}
+.home-sections{margin:42px auto 0;max-width:820px;text-align:left}
+.section-title{font-size:14px;color:var(--muted);margin-bottom:10px}
+.horizontal{display:flex;gap:10px;overflow:auto;padding-bottom:8px}
+.mini-card{min-width:180px;border:1px solid var(--line);border-radius:14px;padding:14px;background:#fff;text-align:left}
+.mini-title{font-weight:600;margin-bottom:4px}.mini-meta{font-size:12px;color:var(--muted)}
+
+/* RESULTS */
+.topbar{position:sticky;top:0;z-index:5;background:rgba(255,255,255,.96);border-bottom:1px solid #eee;padding:12px 18px}
+.results-top{max-width:1100px;margin:0 auto;display:flex;align-items:center;gap:14px}
+.logo-small{font-weight:600;font-size:22px;white-space:nowrap}
+.results-search{flex:1}.results-search .searchbar{height:48px}
+.back-home{border:0;background:transparent;font-size:20px}
+.results-wrap{max-width:980px;margin:0 auto;padding:20px 18px 60px}
+.result-count{font-size:13px;color:var(--muted);margin-bottom:14px}
+.result-item{padding:14px 0 20px;border-bottom:1px solid #eee}
+.result-path{font-size:13px;color:var(--muted);margin-bottom:4px}
+.result-title{border:0;background:none;padding:0;color:#1a0dab;font-size:21px;text-align:left}
+.result-desc{margin-top:6px;line-height:1.6;color:#4d5156}
+.result-meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.chip{background:var(--blue-soft);color:#174ea6;border-radius:999px;padding:4px 8px;font-size:12px}
+.star-btn{border:0;background:transparent;font-size:22px;padding:0 6px}
+
+/* DETAIL */
+.detail-shell{min-height:100vh}
+.detail-header{position:sticky;top:0;z-index:5;background:rgba(255,255,255,.97);border-bottom:1px solid #eee}
+.detail-header-inner{max-width:1200px;margin:0 auto;padding:12px 18px;display:flex;align-items:center;gap:12px}
+.detail-back{border:0;background:transparent;font-size:16px;padding:8px}
+.detail-title-small{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.detail-grid{max-width:1200px;margin:0 auto;display:grid;grid-template-columns:220px minmax(0,1fr) 240px;gap:28px;padding:28px 18px 70px}
+.toc,.sideinfo{position:sticky;top:74px;align-self:start}
+.toc a{display:block;padding:8px 10px;border-left:3px solid transparent;color:#4d5156;text-decoration:none;font-size:14px}
+.article{max-width:760px}.article h1{font-size:34px;margin:0 0 8px}
+.breadcrumb{font-size:13px;color:var(--muted);margin-bottom:10px}.updated{font-size:12px;color:var(--muted);margin-bottom:22px}
+.summary{font-size:17px;line-height:1.7;background:#f8f9fa;border-radius:14px;padding:16px 18px;margin-bottom:26px}
+.block{margin:28px 0}.block h2{font-size:20px;margin:0 0 12px}
+.checklist,.steps{display:grid;gap:9px}.check,.step{padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:#fff}
+.step-num{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:50%;background:var(--blue);color:#fff;font-weight:600;margin-right:8px}
+.notice{padding:14px 16px;border-radius:14px;background:var(--warn);line-height:1.6}.danger{padding:14px 16px;border-radius:14px;background:var(--danger);line-height:1.6}
+.sidebox{border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:14px}.sidebox h3{font-size:14px;margin:0 0 10px}
+.related-btn{display:block;width:100%;border:0;background:#f8f9fa;border-radius:10px;padding:10px;text-align:left;margin-top:7px}
+
+/* ADMIN */
+.admin-shell{min-height:100vh;background:#f8f9fa}
+.admin-header{position:sticky;top:0;z-index:8;background:#fff;border-bottom:1px solid var(--line)}
+.admin-header-inner{max-width:1280px;margin:0 auto;padding:12px 18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.admin-title{font-size:20px;font-weight:700}
+.admin-main{max-width:1280px;margin:0 auto;padding:20px 18px 70px;display:grid;grid-template-columns:360px minmax(0,1fr);gap:18px}
+.admin-list,.editor{background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.admin-list-head{padding:14px;border-bottom:1px solid var(--line)}
+.admin-search{width:100%;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.admin-items{max-height:calc(100vh - 190px);overflow:auto}
+.admin-item{padding:12px 14px;border-bottom:1px solid #eee}
+.admin-item.active{background:var(--blue-soft)}
+.admin-item button{width:100%;border:0;background:transparent;text-align:left;padding:0}
+.admin-item-title{font-weight:600}.admin-item-meta{font-size:12px;color:var(--muted);margin-top:3px}
+.editor{padding:18px}
+.editor-head{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+.editor h2{font-size:22px;margin:0}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.field{display:flex;flex-direction:column;gap:6px}.field.full{grid-column:1/-1}
+.field label{font-size:13px;font-weight:600}
+.field input,.field textarea,.field select{width:100%;border:1px solid var(--line);border-radius:10px;padding:10px 12px;outline:none;background:#fff}
+.field textarea{min-height:92px;resize:vertical}
+.help{font-size:11px;color:var(--muted)}
+.editor-actions{display:flex;gap:10px;flex-wrap:wrap;padding-top:18px;border-top:1px solid #eee;margin-top:20px}
+.statusbar{font-size:12px;color:var(--muted)}
+.file-input{display:none}
+.empty{text-align:center;color:var(--muted);padding:40px}
+
+@media(max-width:900px){
+  .home-inner{padding-top:8vh}.detail-grid{grid-template-columns:1fr}.toc,.sideinfo{display:none}.article{max-width:none}
+  .admin-main{grid-template-columns:1fr}.admin-items{max-height:320px}
+}
+@media(max-width:600px){
+  .home{padding-left:16px;padding-right:16px}.home-inner{padding-top:8vh}.brand{margin-bottom:26px}
+  .searchbar{height:52px}.quick{justify-content:flex-start}.home-sections{margin-top:34px}
+  .logo-small{display:none}.results-wrap{padding-top:12px}.result-title{font-size:20px}
+  .article h1{font-size:28px}.detail-grid{padding:20px 16px 60px}
+  .form-grid{grid-template-columns:1fr}.field.full{grid-column:auto}
+}
+
+/* v0.4 image editor */
+.image-drop{border:2px dashed #c4c9d0;border-radius:13px;padding:17px;background:#fafbfc;outline:none}
+.image-drop:focus,.image-drop.dragover{border-color:#1a73e8;background:#e8f0fe}
+.image-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+.image-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;margin-top:12px}
+.image-item{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:white;padding:9px;min-width:0}
+.image-item img{width:100%;height:130px;object-fit:contain;background:#f4f5f7;border-radius:7px}
+.image-item input,.image-item select{width:100%;margin-top:7px;padding:7px;border:1px solid var(--line);border-radius:7px}
+.image-item button{margin-top:7px}
+.manual-figure{margin:12px 0 16px;padding:10px;border:1px solid var(--line);border-radius:12px;background:#fafafa}
+.manual-figure img{display:block;max-width:100%;max-height:650px;width:auto;height:auto;object-fit:contain;margin:auto;cursor:zoom-in}
+.manual-figure figcaption{text-align:center;color:#5f6368;margin-top:7px;font-size:13px;white-space:pre-wrap}
+.image-fullscreen{position:fixed;z-index:9999;inset:0;background:rgba(0,0,0,.94);display:flex;align-items:center;justify-content:center;padding:38px 10px;cursor:zoom-out}
+.image-fullscreen img{max-width:100%;max-height:100%;object-fit:contain}
+</style>
+</head>
+<body>
+
+<section id="homeScreen" class="screen active home">
+  <div class="home-top"><button class="secondary" id="openAdmin">管理</button></div>
+  <div class="home-inner">
+    <div class="brand"><span>業務</span>マニュアル</div>
+    <div class="searchbar"><span class="search-icon">⌕</span><input id="homeSearch" type="search" placeholder="業務内容を検索" autocomplete="off"></div>
+    <div class="quick" id="quickButtons"></div>
+    <div class="home-sections">
+      <div class="section-title">最近見たマニュアル</div><div id="recentCards" class="horizontal"></div>
+      <div class="section-title" style="margin-top:24px">お気に入り</div><div id="favCards" class="horizontal"></div>
+    </div>
+  </div>
+</section>
+
+<section id="resultsScreen" class="screen">
+  <div class="topbar"><div class="results-top">
+    <button class="back-home" id="backHome">←</button><div class="logo-small">業務マニュアル</div>
+    <div class="results-search"><div class="searchbar"><span class="search-icon">⌕</span><input id="resultsSearch" type="search" placeholder="検索"></div></div>
+  </div></div>
+  <div class="results-wrap"><div id="resultCount" class="result-count"></div><div id="resultsList"></div></div>
+</section>
+
+<section id="detailScreen" class="screen detail-shell">
+  <div class="detail-header"><div class="detail-header-inner">
+    <button class="detail-back" id="detailBack">← 検索結果</button><div id="detailHeaderTitle" class="detail-title-small"></div><div class="spacer"></div><button id="detailStar" class="star-btn">☆</button>
+  </div></div>
+  <div id="detailContent"></div>
+</section>
+
+<section id="adminScreen" class="screen admin-shell">
+  <div class="admin-header"><div class="admin-header-inner">
+    <button class="secondary" id="adminBack">← 閲覧画面</button><div class="admin-title">マニュアル管理</div><div class="spacer"></div>
+    <span id="dbStatus" class="statusbar"></span>
+    <button class="secondary" id="exportJson">バックアップ</button>
+    <label class="secondary" for="importJson" style="cursor:pointer">復元</label>
+    <input id="importJson" class="file-input" type="file" accept=".json,application/json">
+    <button class="primary" id="newManual">＋ 新規追加</button>
+  </div></div>
+
+  <div class="admin-main">
+    <div class="admin-list">
+      <div class="admin-list-head"><input id="adminSearch" class="admin-search" type="search" placeholder="マニュアルを検索"></div>
+      <div id="adminItems" class="admin-items"></div>
+    </div>
+
+    <div class="editor">
+      <div class="editor-head"><h2 id="editorTitle">新規マニュアル</h2><div class="spacer"></div><span id="editState" class="small"></span></div>
+      <form id="manualForm">
+        <input id="fId" type="hidden">
+        <div class="form-grid">
+          <div class="field"><label>タイトル *</label><input id="fTitle" required placeholder="例：所有権解除"></div>
+          <div class="field"><label>カテゴリ *</label><input id="fCategory" required list="categoryList" placeholder="例：登録"><datalist id="categoryList"></datalist></div>
+          <div class="field full"><label>概要 *</label><textarea id="fDescription" required placeholder="検索結果に表示する短い説明"></textarea></div>
+          <div class="field"><label>対象</label><input id="fTarget" placeholder="例：普通車・軽自動車"></div>
+          <div class="field"><label>最終更新日</label><input id="fUpdated" type="date"></div>
+          <div class="field full"><label>タグ</label><input id="fTags" placeholder="普通車, 軽自動車, 所有権"><div class="help">カンマ区切り</div></div>
+          <div class="field full"><label>検索キーワード</label><input id="fKeywords" placeholder="所有権解除, 所有権, 名変, ローン完済"><div class="help">略称・同義語もカンマ区切りで登録</div></div>
+          <div class="field full"><label>必要なもの</label><textarea id="fRequired" placeholder="車検証&#10;印鑑証明書&#10;委任状"></textarea><div class="help">1行につき1項目</div></div>
+          <div class="field full"><label>手順</label><textarea id="fSteps" placeholder="車検証の所有者を確認する&#10;所有権先へ解除書類を依頼する"></textarea><div class="help">1行につき1ステップ。表示時に自動で①②③</div></div>
+          <div class="field full"><label>画像・スクリーンショット</label>
+            <div id="imageDrop" class="image-drop" tabindex="0" aria-label="画像貼り付けエリア">
+              <div class="image-toolbar"><button type="button" class="secondary" id="pickImages">＋ 画像を追加</button><span class="small">ここをクリックして Ctrl+V で貼り付け / ドラッグ＆ドロップ可能</span></div>
+              <input type="file" id="imageFiles" accept="image/*" multiple hidden>
+              <div class="help">画像は自動縮小して保存。各画像を「手順1」などに割り当てられます。変更後はマニュアルの「保存」を押してください。</div>
+              <div id="imageList" class="image-list"></div>
+            </div>
+          </div>
+          <div class="field full"><label>注意事項</label><textarea id="fNotice"></textarea></div>
+          <div class="field full"><label>重要・NG事項</label><textarea id="fDanger"></textarea></div>
+          <div class="field full"><label>関連マニュアル</label><select id="fRelated" multiple size="6"></select><div class="help">PCではCtrl/Commandで複数選択</div></div>
+        </div>
+        <div class="editor-actions">
+          <button class="primary" type="submit">保存</button>
+          <button class="secondary" type="button" id="duplicateManual">複製</button>
+          <button class="danger-btn" type="button" id="deleteManual">削除</button>
+          <span id="saveMsg" class="small"></span>
+        </div>
+      </form>
+    </div>
+  </div>
+</section>
+
+<script>
+const SEED = [];
+
+const $=s=>document.querySelector(s);
+let manuals=[],db=null,currentEditId="",lastQuery="",currentDetailId="",editImages=[];
+const uiStore={get(k,d=[]){try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}},set(k,v){localStorage.setItem(k,JSON.stringify(v))}};
+
+const DB_NAME="BusinessManualDB",STORE_NAME="manuals";
+function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open(DB_NAME,1);r.onupgradeneeded=e=>{const d=e.target.result;if(!d.objectStoreNames.contains(STORE_NAME))d.createObjectStore(STORE_NAME,{keyPath:"id"})};r.onsuccess=e=>{db=e.target.result;res()};r.onerror=()=>rej(r.error)})}
+function dbAll(){return new Promise((res,rej)=>{const r=db.transaction(STORE_NAME).objectStore(STORE_NAME).getAll();r.onsuccess=()=>res(r.result||[]);r.onerror=()=>rej(r.error)})}
+function dbPut(x){return new Promise((res,rej)=>{const t=db.transaction(STORE_NAME,"readwrite");t.objectStore(STORE_NAME).put(x);t.oncomplete=res;t.onerror=()=>rej(t.error)})}
+function dbDel(id){return new Promise((res,rej)=>{const t=db.transaction(STORE_NAME,"readwrite");t.objectStore(STORE_NAME).delete(id);t.oncomplete=res;t.onerror=()=>rej(t.error)})}
+function dbClear(){return new Promise((res,rej)=>{const t=db.transaction(STORE_NAME,"readwrite");t.objectStore(STORE_NAME).clear();t.oncomplete=res;t.onerror=()=>rej(t.error)})}
+async function loadManuals(){manuals=await dbAll();if(!manuals.length){for(const m of SEED)await dbPut(m);manuals=await dbAll()}manuals.sort((a,b)=>(a.title||"").localeCompare(b.title||"","ja"));refreshAll()}
+
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function show(id){document.querySelectorAll(".screen").forEach(x=>x.classList.remove("active"));$("#"+id).classList.add("active");window.scrollTo(0,0)}
+function norm(s){return(s||"").toLowerCase().replace(/\s+/g,"")}
+function score(m,q){if(!q)return 1;const n=norm(q),title=norm(m.title),desc=norm(m.description),words=[...(m.tags||[]),...(m.keywords||[])].map(norm);let s=0;if(title===n)s+=100;if(title.includes(n))s+=70;if(words.some(w=>w===n))s+=60;if(words.some(w=>w.includes(n)||n.includes(w)))s+=40;if(desc.includes(n))s+=15;return s}
+function fmtDate(s){return s?s.replaceAll("-","/"):"未設定"}
+
+function favs(){return uiStore.get("manual-favs")}
+function isFav(id){return favs().includes(id)}
+function toggleFav(id){let a=favs();a=a.includes(id)?a.filter(x=>x!==id):[id,...a];uiStore.set("manual-favs",a);renderHomeCards();if(currentDetailId===id)$("#detailStar").textContent=isFav(id)?"★":"☆"}
+function addRecent(id){let a=uiStore.get("manual-recent").filter(x=>x!==id);a.unshift(id);uiStore.set("manual-recent",a.slice(0,8));renderHomeCards()}
+
+function renderQuick(){const qs=["所有権解除","希望番号","OSS","車庫証明","納車","保険"];$("#quickButtons").innerHTML=qs.map(q=>`<button data-q="${q}">${q}</button>`).join("");document.querySelectorAll("[data-q]").forEach(b=>b.onclick=()=>doSearch(b.dataset.q))}
+function renderHomeCards(){
+ const recent=uiStore.get("manual-recent").map(id=>manuals.find(m=>m.id===id)).filter(Boolean);
+ const favorite=favs().map(id=>manuals.find(m=>m.id===id)).filter(Boolean);
+ const render=a=>a.length?a.map(m=>`<button class="mini-card" data-home-open="${m.id}"><div class="mini-title">${esc(m.title)}</div><div class="mini-meta">${esc(m.category)}・更新 ${fmtDate(m.updated)}</div></button>`).join(""):`<div class="mini-meta">まだありません</div>`;
+ $("#recentCards").innerHTML=render(recent);$("#favCards").innerHTML=render(favorite);
+ document.querySelectorAll("[data-home-open]").forEach(b=>b.onclick=()=>openManual(b.dataset.homeOpen))
+}
+function doSearch(q){q=q.trim();lastQuery=q;$("#homeSearch").value=q;$("#resultsSearch").value=q;renderResults(q);show("resultsScreen")}
+function renderResults(q){
+ const arr=manuals.map(m=>({m,s:score(m,q)})).filter(x=>x.s>0).sort((a,b)=>b.s-a.s).map(x=>x.m);
+ $("#resultCount").textContent=q?`「${q}」の検索結果 ${arr.length}件`:`マニュアル ${arr.length}件`;
+ $("#resultsList").innerHTML=arr.length?arr.map(m=>`<article class="result-item"><div class="result-path">業務マニュアル ＞ ${esc(m.category)}</div><div class="row"><button class="result-title" data-open="${m.id}">${esc(m.title)}</button><button class="star-btn" data-star="${m.id}">${isFav(m.id)?"★":"☆"}</button></div><div class="result-desc">${esc(m.description)}</div><div class="result-meta">${(m.tags||[]).map(t=>`<span class="chip">${esc(t)}</span>`).join("")}<span class="chip">更新 ${fmtDate(m.updated)}</span></div></article>`).join(""):`<div class="empty">該当するマニュアルがありません</div>`;
+ document.querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>openManual(b.dataset.open));
+ document.querySelectorAll("[data-star]").forEach(b=>b.onclick=()=>{toggleFav(b.dataset.star);renderResults(lastQuery)})
+}
+function imageFigures(m,position){return (m.images||[]).filter(x=>(Number(x.step)||0)===position && /^data:image\/(jpeg|png|webp);base64,/.test(x.src||"")).map(x=>`<figure class="manual-figure"><img alt="${esc(x.caption||"手順画像")}" src="${x.src}" loading="lazy"><figcaption>${esc(x.caption||"")}</figcaption></figure>`).join("")}
+function showImageZoom(src){const overlay=document.createElement("div");overlay.className="image-fullscreen";const img=document.createElement("img");img.src=src;overlay.append(img);overlay.onclick=()=>overlay.remove();document.body.append(overlay)}
+function openManual(id){
+ const m=manuals.find(x=>x.id===id);if(!m)return;currentDetailId=id;addRecent(id);
+ $("#detailHeaderTitle").textContent=m.title;$("#detailStar").textContent=isFav(id)?"★":"☆";$("#detailStar").onclick=()=>toggleFav(id);
+ const related=(m.related||[]).map(id=>manuals.find(x=>x.id===id)).filter(Boolean);
+ $("#detailContent").innerHTML=`<div class="detail-grid"><nav class="toc"><a href="#summary">概要</a><a href="#required">必要なもの</a><a href="#steps">手順</a><a href="#images">画像</a><a href="#notice">注意事項</a></nav><main class="article"><div class="breadcrumb">業務マニュアル ＞ ${esc(m.category)}</div><h1>${esc(m.title)}</h1><div class="updated">最終更新 ${fmtDate(m.updated)}</div><div id="summary" class="summary">${esc(m.description)}</div><section id="required" class="block"><h2>必要なもの</h2><div class="checklist">${(m.required||[]).length?(m.required||[]).map(x=>`<div class="check">□ ${esc(x)}</div>`).join(""):`<div class="small">登録なし</div>`}</div></section><section id="steps" class="block"><h2>手順</h2><div class="steps">${(m.steps||[]).length?(m.steps||[]).map((x,i)=>`<div class="step"><span class="step-num">${i+1}</span>${esc(x)}${imageFigures(m,i+1)}</div>`).join(""):`<div class="small">登録なし</div>`}</div></section><section id="images" class="block"><h2>参考画像</h2>${imageFigures(m,0)||`<div class="small">手順内に掲載された画像、または登録なし</div>`}</section><section id="notice" class="block"><h2>注意事項</h2>${m.notice?`<div class="notice">⚠ ${esc(m.notice)}</div>`:`<div class="small">登録なし</div>`}${m.danger?`<div class="danger" style="margin-top:10px">! ${esc(m.danger)}</div>`:""}</section></main><aside class="sideinfo"><div class="sidebox"><h3>対象</h3><div>${esc(m.target||"未設定")}</div></div><div class="sidebox"><h3>関連マニュアル</h3>${related.length?related.map(r=>`<button class="related-btn" data-related="${r.id}">${esc(r.title)}</button>`).join(""):`<div class="mini-meta">なし</div>`}</div></aside></div>`;
+ document.querySelectorAll("[data-related]").forEach(b=>b.onclick=()=>openManual(b.dataset.related));document.querySelectorAll(".manual-figure img").forEach(img=>img.onclick=()=>showImageZoom(img.src));show("detailScreen")
+}
+
+function today(){return new Date().toISOString().slice(0,10)}
+function csv(v){return v.split(",").map(x=>x.trim()).filter(Boolean)}
+function lines(v){return v.split(/\r?\n/).map(x=>x.trim()).filter(Boolean)}
+function slug(){return"manual-"+Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,7)}
+function renderAdminList(filter=""){
+ const q=norm(filter),arr=manuals.filter(m=>!q||norm(m.title).includes(q)||norm(m.category).includes(q)||norm((m.tags||[]).join(" ")).includes(q));
+ $("#adminItems").innerHTML=arr.length?arr.map(m=>`<div class="admin-item ${m.id===currentEditId?"active":""}"><button data-edit="${m.id}"><div class="admin-item-title">${esc(m.title)}</div><div class="admin-item-meta">${esc(m.category)}・${fmtDate(m.updated)}</div></button></div>`).join(""):`<div class="empty">該当なし</div>`;
+ document.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>editManual(b.dataset.edit))
+}
+function renderAdminOptions(){
+ const cats=[...new Set(manuals.map(m=>m.category).filter(Boolean))].sort();
+ $("#categoryList").innerHTML=cats.map(c=>`<option value="${esc(c)}"></option>`).join("");
+ $("#fRelated").innerHTML=manuals.filter(m=>m.id!==currentEditId).map(m=>`<option value="${m.id}">${esc(m.title)}（${esc(m.category)}）</option>`).join("")
+}
+function renderImageEditor(){
+ const list=$("#imageList");list.innerHTML="";
+ editImages.forEach((im,i)=>{
+  const item=document.createElement("div");item.className="image-item";
+  const picture=document.createElement("img");picture.src=im.src;picture.alt="登録画像";
+  const caption=document.createElement("input");caption.placeholder="画像の説明（任意）";caption.value=im.caption||"";caption.oninput=()=>im.caption=caption.value;
+  const pos=document.createElement("select");const count=lines($("#fSteps").value).length;
+  for(let j=0;j<=count;j++){const o=document.createElement("option");o.value=j;o.textContent=j===0?"参考画像（末尾）":`手順 ${j} の下`;pos.append(o)}pos.value=Number(im.step)>count?"0":String(im.step||0);pos.onchange=()=>im.step=Number(pos.value);
+  const del=document.createElement("button");del.type="button";del.className="danger-btn";del.textContent="削除";del.onclick=()=>{editImages.splice(i,1);renderImageEditor()};
+  item.append(picture,caption,pos,del);list.append(item)
+ });
+}
+function imageToData(file){return new Promise((resolve,reject)=>{
+ if(!file||!file.type.startsWith("image/")){reject(Error("画像ファイルではありません"));return}
+ const reader=new FileReader();reader.onerror=()=>reject(Error("画像の読み取り失敗"));reader.onload=()=>{
+ const img=new Image();img.onerror=()=>reject(Error("画像を開けません"));img.onload=()=>{
+ const scale=Math.min(1,1600/Math.max(img.width,img.height));const canvas=document.createElement("canvas");canvas.width=Math.max(1,Math.round(img.width*scale));canvas.height=Math.max(1,Math.round(img.height*scale));const ctx=canvas.getContext("2d");ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(img,0,0,canvas.width,canvas.height);
+ const png=canvas.toDataURL("image/png");resolve(png.length<1200000?png:canvas.toDataURL("image/jpeg",0.86));};img.src=reader.result
+ };reader.readAsDataURL(file)
+})}
+async function addImages(files){const items=[...files].filter(f=>f.type.startsWith("image/"));if(!items.length)return;
+ for(const f of items){try{const src=await imageToData(f);editImages.push({src,caption:"",step:0})}catch(e){alert(`${f.name||"画像"}: ${e.message}`)}}renderImageEditor()
+}
+function clearForm(){
+ currentEditId="";editImages=[];$("#manualForm").reset();renderImageEditor();$("#fId").value="";$("#fUpdated").value=today();$("#editorTitle").textContent="新規マニュアル";$("#editState").textContent="新規";$("#duplicateManual").disabled=true;$("#deleteManual").disabled=true;renderAdminOptions();renderAdminList($("#adminSearch").value)
+}
+function editManual(id){
+ const m=manuals.find(x=>x.id===id);if(!m)return;currentEditId=id;editImages=structuredClone(m.images||[]);
+ $("#fId").value=m.id;$("#fTitle").value=m.title||"";$("#fCategory").value=m.category||"";$("#fDescription").value=m.description||"";$("#fTarget").value=m.target||"";$("#fUpdated").value=m.updated||today();$("#fTags").value=(m.tags||[]).join(", ");$("#fKeywords").value=(m.keywords||[]).join(", ");$("#fRequired").value=(m.required||[]).join("\n");$("#fSteps").value=(m.steps||[]).join("\n");$("#fNotice").value=m.notice||"";$("#fDanger").value=m.danger||"";renderImageEditor();
+ $("#editorTitle").textContent=m.title;$("#editState").textContent="編集中";$("#duplicateManual").disabled=false;$("#deleteManual").disabled=false;renderAdminOptions();[...$("#fRelated").options].forEach(o=>o.selected=(m.related||[]).includes(o.value));renderAdminList($("#adminSearch").value)
+}
+function formToManual(forceId=null){
+ return{id:forceId||$("#fId").value||slug(),title:$("#fTitle").value.trim(),category:$("#fCategory").value.trim(),description:$("#fDescription").value.trim(),target:$("#fTarget").value.trim(),updated:$("#fUpdated").value||today(),tags:csv($("#fTags").value),keywords:csv($("#fKeywords").value),required:lines($("#fRequired").value),steps:lines($("#fSteps").value),notice:$("#fNotice").value.trim(),danger:$("#fDanger").value.trim(),images:editImages.map(im=>({...im,step:Number(im.step)<=lines($("#fSteps").value).length?Number(im.step):0})),related:[...$("#fRelated").selectedOptions].map(o=>o.value)}
+}
+async function saveManual(e){e.preventDefault();const x=formToManual();try{await dbPut(x);await loadManuals();editManual(x.id);$("#saveMsg").textContent="保存しました";setTimeout(()=>$("#saveMsg").textContent="",1500)}catch(err){console.error(err);alert("保存に失敗しました。画像が多すぎるか、ブラウザの保存容量が不足している可能性があります。")}}
+async function duplicateManual(){if(!currentEditId)return;const x=formToManual(slug());x.title+=" コピー";x.updated=today();await dbPut(x);await loadManuals();editManual(x.id)}
+async function deleteManual(){if(!currentEditId)return;const m=manuals.find(x=>x.id===currentEditId);if(!confirm(`「${m?.title||""}」を削除しますか？`))return;await dbDel(currentEditId);await loadManuals();clearForm()}
+function exportJson(){const blob=new Blob([JSON.stringify({app:"業務マニュアル検索",version:"0.4",exportedAt:new Date().toISOString(),manuals},null,2)],{type:"application/json"});const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=`業務マニュアル_backup_${today()}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+async function importJson(file){if(!file)return;try{const data=JSON.parse(await file.text()),arr=Array.isArray(data)?data:data.manuals;if(!Array.isArray(arr))throw 0;if(!confirm(`${arr.length}件のデータで現在の内容を置き換えます。よろしいですか？`))return;await dbClear();for(const x of arr)if(x?.id&&x?.title)await dbPut(x);await loadManuals();clearForm();alert("復元しました")}catch{alert("バックアップファイルを読み込めませんでした")}}
+function refreshAll(){renderQuick();renderHomeCards();renderResults(lastQuery);renderAdminOptions();renderAdminList($("#adminSearch")?.value||"");$("#dbStatus").textContent=`ローカルDB：${manuals.length}件`}
+
+$("#homeSearch").addEventListener("keydown",e=>{if(e.key==="Enter")doSearch(e.target.value)});
+$("#resultsSearch").addEventListener("keydown",e=>{if(e.key==="Enter")doSearch(e.target.value)});
+$("#backHome").onclick=()=>show("homeScreen");$("#detailBack").onclick=()=>show("resultsScreen");
+$("#openAdmin").onclick=()=>{show("adminScreen");clearForm()};$("#adminBack").onclick=()=>show("homeScreen");
+$("#newManual").onclick=clearForm;$("#adminSearch").addEventListener("input",e=>renderAdminList(e.target.value));
+$("#pickImages").onclick=()=>$("#imageFiles").click();
+$("#imageDrop").addEventListener("click",e=>{if(e.target.id==="imageDrop")e.currentTarget.focus()});
+$("#imageFiles").onchange=async e=>{await addImages(e.target.files);e.target.value=""};
+$("#imageDrop").addEventListener("paste",e=>{const files=[...e.clipboardData.items].filter(x=>x.type.startsWith("image/")).map(x=>x.getAsFile()).filter(Boolean);if(files.length){e.preventDefault();addImages(files)}});
+$("#imageDrop").addEventListener("dragover",e=>{e.preventDefault();e.currentTarget.classList.add("dragover")});
+$("#imageDrop").addEventListener("dragleave",e=>e.currentTarget.classList.remove("dragover"));
+$("#imageDrop").addEventListener("drop",e=>{e.preventDefault();e.currentTarget.classList.remove("dragover");addImages(e.dataTransfer.files)});
+$("#fSteps").addEventListener("blur",renderImageEditor);
+$("#manualForm").addEventListener("submit",saveManual);$("#duplicateManual").onclick=duplicateManual;$("#deleteManual").onclick=deleteManual;
+$("#exportJson").onclick=exportJson;$("#importJson").addEventListener("change",e=>{importJson(e.target.files[0]);e.target.value=""});
+
+(async()=>{try{await openDB();await loadManuals();clearForm()}catch(e){console.error(e);alert("このブラウザではローカル保存を利用できない可能性があります。")}})();
+</script>
+</body>
+</html>
