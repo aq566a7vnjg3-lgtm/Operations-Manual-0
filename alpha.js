@@ -12,7 +12,7 @@ const formatTime = value => value ? new Date(value).toLocaleString('ja-JP', { ti
 
 document.body.insertAdjacentHTML('afterbegin', `
  <div id="sharedBar" hidden>
-   <span class="shared-brand">業務マニュアル <span class="alpha-label">共有α版</span></span>
+   <span class="shared-brand">業務マニュアル <span class="alpha-label">共有版</span></span>
    <span id="syncState" role="status"></span><div class="spacer"></div>
    <span id="staffName"></span>
    <button type="button" class="secondary" id="openHistory">更新履歴</button>
@@ -22,7 +22,7 @@ document.body.insertAdjacentHTML('afterbegin', `
  </div>
  <div id="sharedMessage" role="alert" hidden></div>
  <section id="loginScreen" class="screen auth-screen">
-   <div class="auth-wrap"><h1>業務マニュアル</h1><p class="small">共有α版</p>
+   <div class="auth-wrap"><h1>業務マニュアル</h1><p class="small">共有版</p>
    <h2 id="authTitle">ログイン</h2>
    <form id="authForm" class="auth-form">
      <div class="field" id="setupNameField" hidden><label for="setupName">管理者の氏名</label><input id="setupName" maxlength="100" autocomplete="name"></div>
@@ -49,6 +49,7 @@ document.body.insertAdjacentHTML('afterbegin', `
    </form></section>
    <section class="workspace-section"><div class="workspace-heading"><h2>バックアップ</h2><button class="secondary" id="createBackup">今すぐ作成</button></div>
      <p id="backupHealth" role="status"></p><div id="backupList"></div>
+     <p class="small">サーバー障害や誤削除に備え、バックアップは別の場所にも保管してください。</p>
    </section>
    <section class="workspace-section"><h2>管理の操作履歴</h2><div id="auditList"></div></section>
  </section>

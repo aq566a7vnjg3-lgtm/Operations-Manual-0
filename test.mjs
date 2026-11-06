@@ -169,6 +169,14 @@ test('Render bootstrap, readiness and preview banner', async () => {
     app = createApplication({ dataDir, initialAdmin: { username: 'admin', password: 'different-password-1234' } });
     await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
     origin = `http://127.0.0.1:${app.server.address().port}`;
+    const sharedHtml = await (await fetch(origin)).text();
+    assert.ok(sharedHtml.includes('<title>業務マニュアル 共有版</title>'));
+    assert.ok(!sharedHtml.includes('正式な業務資料は登録しないでください'));
+    assert.ok(!sharedHtml.includes('class="preview-banner"'));
+    assert.equal((await (await fetch(`${origin}/health`)).json()).preview, false);
+    const sharedJs = await (await fetch(`${origin}/alpha.js`)).text();
+    assert.ok(!sharedJs.includes('共有α版'));
+    assert.ok(sharedJs.includes('バックアップは別の場所にも保管してください'));
     assert.equal((await client(origin).login('admin')).role, 'admin');
   } finally { await app.close(); }
 });

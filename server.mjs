@@ -169,7 +169,7 @@ export function createApplication({ dataDir = join(ROOT, 'data'), secureCookies 
     return { ...JSON.parse(body), revision };
   }
   const html = readFileSync(join(ROOT, 'base.html'), 'utf8')
-    .replace('<title>業務マニュアル検索 v0.4</title>', '<title>業務マニュアル 共有α版</title>')
+    .replace('<title>業務マニュアル検索 v0.4</title>', '<title>業務マニュアル 共有版</title>')
     .replace('</head>', '<link rel="stylesheet" href="/alpha.css"></head>')
     .replace('<body>', previewMode ? '<body><div class="preview-banner" role="note">動作確認版：再起動・再配置・休止で登録データが消える場合があります。正式な業務資料は登録しないでください。</div>' : '<body>')
     .replace(/\(async\(\)=>\{try\{await openDB\(\);await loadManuals\(\);clearForm\(\)\}catch\(e\)\{console.error\(e\);alert\([^\n]+\}\}\)\(\);/, '')
@@ -193,7 +193,7 @@ export function createApplication({ dataDir = join(ROOT, 'data'), secureCookies 
       const path = url.pathname;
       if (req.method === 'GET' && path === '/health') {
         get('SELECT 1 AS ready');
-        send(200, { ok: true, version: '0.6-alpha-accounts', preview: previewMode }); return;
+        send(200, { ok: true, version: '0.6.1-shared', preview: previewMode }); return;
       }
       if (req.method === 'GET' && assets[path]) {
         const [type, body] = assets[path]; res.writeHead(200, { 'Content-Type': type }); res.end(body); return;

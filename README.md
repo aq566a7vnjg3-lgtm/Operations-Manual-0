@@ -1,6 +1,6 @@
 # Operations-Manual-0
 
-業務マニュアル Render起動確認版
+業務マニュアル 共有版
 
 GitHubでコードを管理し、RenderのNode.js Web Serviceで実行する版です。
 元のHTMLと `alpha/`、Sites用の `online-alpha/` は別に残してあります。
@@ -11,13 +11,15 @@ GitHubでコードを管理し、RenderのNode.js Web Serviceで実行する版�
 ## 起動設定
 
 - Runtime: Node.js 24
-- Plan: Free（今回の起動確認用）
+- Compute: `0.5c-512mb`（旧Starter）
+- Persistent disk: 5GB / Mount path: `/var/data`
 - Build command: `node --test test.mjs`
 - Start command: `node server.mjs`
 - Health check: `/health`
 - `HOST=0.0.0.0`
 - `MANUAL_HTTPS=1`
-- `MANUAL_PREVIEW_MODE=1`
+- `MANUAL_PREVIEW_MODE=0`
+- `MANUAL_DATA_DIR=/var/data`
 - `INITIAL_ADMIN_USERNAME=admin`
 - `INITIAL_ADMIN_NAME=管理者`
 - `INITIAL_ADMIN_PASSWORD`: Renderの環境変数で設定する8〜128文字の秘密値（既存配置の初期資格情報は維持）
@@ -26,17 +28,19 @@ DBが空のときだけ初期管理者を作成します。既存の管理者パ
 初期パスワードをソース、ログ、README、GitHubへ載せないでください。
 ログイン用パスワードはRenderのEnvironment画面で確認します。
 
-## 無料版の位置付け
+## 永続保存とバックアップ
 
-**起動・操作確認専用です。正式な業務データを登録しないでください。**
+公開環境は有料Computeと5GBの永続ディスクを使用します。
+本文・画像・アカウント・更新履歴・サーバー内バックアップは `/var/data` に保存します。
+画面名を「共有版」とし、無料の試験環境向けの消失警告は表示しません。
+これは無停止運用・第三者による安全性評価・データ消失ゼロを保証するものではありません。
 
-Render Freeは再起動、再配置、休止でファイルが失われます。
-マニュアル、画像、スタッフ、更新履歴と自動バックアップは同じ一時ファイルシステム上にあるため、すべて失われ得ます。
-画面上にもその旨を表示します。一定時間使わないと休止し、次に開く際の起動に時間がかかることがあります。
+永続ディスクは通常の再起動・再配置後もマウント配下のデータを維持します。
+誤削除・障害・サービスやディスクの削除等に備え、全体バックアップを別の保存先にも保管してください。
+外部への自動退避は未設定です。同じディスク内のバックアップだけでは十分ではありません。
 
-継続運用では有料の永続ディスク等が必要です。契約・課金の確認後、
-`MANUAL_DATA_DIR` をそのマウント先に設定し、画面の検証用表示を外します。
-同じディスク内のバックアップだけでなく、管理者がダウンロードして別の場所にも保管してください。
+無料の使い捨て検証環境を別に作る場合だけ `MANUAL_PREVIEW_MODE=1` を設定し、
+正式な資料を登録しないでください。有料化だけでは永続保存にならず、ディスクの接続と保存先の一致が必要です。
 
 ## ローカル確認
 
