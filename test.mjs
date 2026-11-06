@@ -44,6 +44,7 @@ test('shared alpha: authorization, concurrency, migration, recovery and persiste
       await editor.login('editor'); await otherEditor.login('editor'); await viewer.login('viewer');
       const html = await (await fetch(origin)).text();
       assert.ok(html.includes('/alpha.js')); assert.ok(!html.includes('await openDB();await loadManuals();clearForm()'));
+      assert.ok(html.includes('<div class="check">• ')); assert.ok(!html.includes('<div class="check">□ '));
       assert.equal((await fetch(`${origin}/data/manuals.sqlite`)).status, 404);
     });
     await t.test('server enforces roles, same-origin and CSRF', async () => {
