@@ -10,10 +10,13 @@ GitHubでコードを管理し、RenderのNode.js Web Serviceで実行する版�
 
 ## 起動設定
 
+画像改善版 v0.7.0 の保存・配信仕様とローカル検証結果をまとめています。
+詳細は `IMAGE_IMPROVEMENTS.md` を参照してください。
+
 - Runtime: Node.js 24
 - Compute: `0.5c-512mb`（旧Starter）
 - Persistent disk: 5GB / Mount path: `/var/data`
-- Build command: `node --test test.mjs`
+- Build command: `npm ci && npm test`
 - Start command: `node server.mjs`
 - Health check: `/health`
 - `HOST=0.0.0.0`
@@ -45,7 +48,8 @@ DBが空のときだけ初期管理者を作成します。既存の管理者パ
 ## ローカル確認
 
 ```text
-node --test test.mjs
+npm ci
+npm test
 node server.mjs
 ```
 

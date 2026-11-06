@@ -40,3 +40,25 @@ dialog::backdrop{background:rgba(0,0,0,.4)}.dialog-heading{display:flex;align-it
 @media(max-width:900px){.staff-form{grid-template-columns:1fr 1fr}.brand{font-size:44px}}
 @media(max-width:600px){#sharedBar{gap:8px;padding:10px 12px}.shared-brand{flex-basis:100%}#sharedBar .spacer{display:none}#staffName{flex-basis:100%}.brand{font-size:36px}.home-inner{padding-top:5vh}.detail-header-inner{gap:5px;flex-wrap:wrap}.detail-title-small{min-width:0;flex:1}.detail-back{font-size:13px}.detail-header-inner .secondary{font-size:12px;padding:7px}.article h1{font-size:26px;overflow-wrap:anywhere}.staff-form{grid-template-columns:1fr}.staff-row{grid-template-columns:minmax(100px,1fr) 90px}.history-row{align-items:flex-start}.history-row button{padding:8px;font-size:12px}.audit-row,.backup-row{align-items:flex-start;flex-direction:column;gap:6px}.mini-card{min-width:160px}.workspace-heading h1{font-size:20px}}
 @media print{#sharedBar,#sharedMessage,.detail-header,.toc,.sideinfo,.screen:not(#detailScreen){display:none!important}#detailScreen{display:block!important}.detail-grid{display:block;padding:0;max-width:none}.article{max-width:none}.article h1{font-size:22pt}.manual-figure img{max-height:180mm}.step,.check,.manual-figure{break-inside:avoid}.block h2{break-after:avoid}.ownership-meta{color:#000}@page{size:A4;margin:14mm}}
+html { scrollbar-gutter: stable; }
+.manual-figure img { background: #f3f5f7; }
+.manual-figure img:focus-visible { outline: 3px solid #1a73e8; outline-offset: 3px; }
+.image-item img { object-fit: contain; background: #f3f5f7; }
+#imageViewer { position: fixed; inset: 0; margin: 0; padding: 0; border: 0; border-radius: 0; width: 100%; height: 100dvh; max-width: 100%; max-height: 100dvh; background: #151719; color: white; overflow: hidden; }
+#imageViewer::backdrop { background: rgba(0, 0, 0, .94); }
+#imageViewer[open] { display: flex; flex-direction: column; }
+.image-viewer-toolbar { display: flex; gap: 6px; align-items: center; flex: 0 0 58px; padding: 6px max(8px, env(safe-area-inset-right)) 6px max(8px, env(safe-area-inset-left)); background: #24272a; }
+#imageViewerCaption { flex: 1; min-width: 0; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#imageViewerScale { flex: 0 0 56px; text-align: right; font-size: 13px; font-variant-numeric: tabular-nums; }
+.image-viewer-toolbar button { width: 42px; height: 42px; flex: 0 0 42px; padding: 0; border: 1px solid #62676c; border-radius: 4px; background: #303438; color: white; font-size: 22px; touch-action: manipulation; }
+.image-viewer-toolbar button:disabled { opacity: .4; }
+#imageActual { font-size: 14px; }
+#imageViewerStage { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: none; user-select: none; cursor: grab; }
+#imageViewerStage:active { cursor: grabbing; }
+#imageViewerPicture { position: absolute; left: 50%; top: 50%; max-width: none; max-height: none; transform-origin: center; pointer-events: none; }
+#imageViewerError { position: absolute; left: 16px; top: 16px; right: 16px; }
+@media (max-width: 420px) {
+  .image-viewer-toolbar { gap: 4px; }
+  .image-viewer-toolbar button { width: 40px; flex-basis: 40px; }
+  #imageViewerScale { flex-basis: 48px; }
+}

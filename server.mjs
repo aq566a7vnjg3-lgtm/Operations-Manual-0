@@ -6,6 +6,7 @@ import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROLE_DEFINITIONS, PERMISSIONS, permissionsFor } from './permissions.mjs';
 import { restoreSystemBackup } from './restore.mjs';
+import { decodeImage, imageDimensions, optimizeImage } from './image-service.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const MAX_BODY = 40 * 1024 * 1024;
@@ -73,7 +74,9 @@ export function validateManual(input) {
     if (image.src.length > 3 * 1024 * 1024 || size > 15 * 1024 * 1024) fail(400, '画像は1枚3MB、1マニュアル合計15MBまでです。');
     const step = Number(image.step ?? 0);
     if (!Number.isInteger(step) || step < 0 || step > out.steps.length) fail(400, '画像の手順番号を確認してください。');
-    return { src: image.src, caption: text(image.caption, '画像の説明', 2000), step };
+    const dimensions = {};
+    for (const key of ['width', 'height']) if (Number.isInteger(image[key]) && image[key] > 0 && image[key] <= 65535) dimensions[key] = image[key];
+    return { src: image.src, caption: text(image.caption, '画像の説明', 2000), step, ...dimensions };
   });
   return out;
 }
@@ -159,6 +162,34 @@ export function createApplication({ dataDir = join(ROOT, 'data'), secureCookies 
   const timer = setInterval(dailyBackup, 60 * 60 * 1000);
   timer.unref();
   const readManuals = () => all('SELECT body,revision FROM manuals').map(row => ({ ...JSON.parse(row.body), revision: row.revision }));
+  const imagePath = /^\/api\/images\/([a-zA-Z0-9_-]+)\/(\d+)\/(\d+)$/;
+  const dimensionsCache = new Map();
+  let optimizing = false;
+  function referencedImage(src) {
+    const match = imagePath.exec(src || '');
+    if (!match) fail(400, '画像の参照が正しくありません。');
+    const row = get('SELECT body FROM revisions WHERE manual_id=? AND revision=?', match[1], Number(match[2]));
+    const image = row && JSON.parse(row.body).images?.[Number(match[3])];
+    if (!image) fail(404, '画像が見つかりません。');
+    return image;
+  }
+  function expandImages(input) {
+    if (!Array.isArray(input?.images)) return input;
+    return { ...input, images: input.images.map(image => typeof image?.src === 'string' && image.src.startsWith('/api/images/')
+      ? { ...referencedImage(image.src), caption: image.caption, step: image.step } : image) };
+  }
+  async function linkedManual(manual) {
+    return { ...manual, images: await Promise.all((manual.images || []).map(async (image, index) => {
+      const key = hashToken(image.src);
+      let dimensions = dimensionsCache.get(key);
+      if (!dimensions) {
+        dimensions = await imageDimensions(image.src);
+        if (dimensionsCache.size >= 256) dimensionsCache.delete(dimensionsCache.keys().next().value);
+        dimensionsCache.set(key, dimensions);
+      }
+      return { ...image, ...dimensions, bytes: decodeImage(image.src).bytes.length, src: `/api/images/${manual.id}/${manual.revision}/${index}` };
+    })) };
+  }
   function record(input, actor, action = 'save') {
     const previous = get('SELECT MAX(revision) AS revision FROM revisions WHERE manual_id=?', input.id);
     const revision = (previous?.revision || 0) + 1;
@@ -173,11 +204,12 @@ export function createApplication({ dataDir = join(ROOT, 'data'), secureCookies 
     .replace('</head>', '<link rel="stylesheet" href="/alpha.css"></head>')
     .replace('<body>', previewMode ? '<body><div class="preview-banner" role="note">動作確認版：再起動・再配置・休止で登録データが消える場合があります。正式な業務資料は登録しないでください。</div>' : '<body>')
     .replace(/\(async\(\)=>\{try\{await openDB\(\);await loadManuals\(\);clearForm\(\)\}catch\(e\)\{console.error\(e\);alert\([^\n]+\}\}\)\(\);/, '')
-    .replace('</body>', '<script src="/alpha.js"></script></body>');
+    .replace('</body>', '<script src="/images.js"></script><script src="/alpha.js"></script></body>');
   if (html.includes('await openDB();await loadManuals();clearForm()')) throw new Error('The legacy initialization was not removed.');
   const assets = {
     '/': ['text/html; charset=utf-8', html],
     '/alpha.js': ['text/javascript; charset=utf-8', readFileSync(join(ROOT, 'alpha.js'))],
+    '/images.js': ['text/javascript; charset=utf-8', readFileSync(join(ROOT, 'images.js'))],
     '/alpha.css': ['text/css; charset=utf-8', readFileSync(join(ROOT, 'alpha.css'))]
   };
   const attempts = new Map();
@@ -193,7 +225,7 @@ export function createApplication({ dataDir = join(ROOT, 'data'), secureCookies 
       const path = url.pathname;
       if (req.method === 'GET' && path === '/health') {
         get('SELECT 1 AS ready');
-        send(200, { ok: true, version: '0.6.1-shared', preview: previewMode }); return;
+        send(200, { ok: true, version: '0.7.0-images', preview: previewMode }); return;
       }
       if (req.method === 'GET' && assets[path]) {
         const [type, body] = assets[path]; res.writeHead(200, { 'Content-Type': type }); res.end(body); return;
@@ -204,7 +236,8 @@ export function createApplication({ dataDir = join(ROOT, 'data'), secureCookies 
         if (req.headers.origin !== `${secureCookies ? 'https' : 'http'}://${req.headers.host}`) fail(403, '同じ画面から操作してください。');
         if (!req.headers['content-type']?.startsWith('application/json')) fail(415, 'JSON形式で送信してください。');
         const chunks = []; let bytes = 0;
-        for await (const chunk of req) { bytes += chunk.length; if (bytes > MAX_BODY) fail(413, '送信サイズは40MBまでです。'); chunks.push(chunk); }
+        const limit = path === '/api/optimize-image' ? 41 * 1024 * 1024 : MAX_BODY;
+        for await (const chunk of req) { bytes += chunk.length; if (bytes > limit) fail(413, '送信サイズが上限を超えています。'); chunks.push(chunk); }
         try { body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { fail(400, 'JSONの形式が正しくありません。'); }
         if (!body || typeof body !== 'object' || Array.isArray(body)) fail(400, '送信内容を確認してください。');
       }
@@ -255,16 +288,37 @@ export function createApplication({ dataDir = join(ROOT, 'data'), secureCookies 
         transaction(() => { run('UPDATE users SET password=? WHERE id=?', passwordHash(password(body.password)), session.user_id); run('DELETE FROM sessions WHERE user_id=? AND token<>?', session.user_id, session.token); audit('パスワードを変更', session.name); });
         send(200, { ok: true }); return;
       }
-      if (req.method === 'GET' && path === '/api/manuals') { send(200, readManuals()); return; }
+      if (req.method === 'POST' && path === '/api/optimize-image') {
+        editor();
+        if (optimizing) fail(429, '別の画像を変換中です。少し待ってから再度追加してください。');
+        optimizing = true;
+        try { send(200, await optimizeImage(body.src)); } finally { optimizing = false; }
+        return;
+      }
+      if (req.method === 'GET' && imagePath.test(path)) {
+        const image = referencedImage(path), { bytes, type } = decodeImage(image.src);
+        const etag = `"${hashToken(bytes)}"`;
+        res.setHeader('Cache-Control', 'private, no-cache');
+        res.setHeader('Vary', 'Cookie');
+        res.setHeader('ETag', etag);
+        if ((req.headers['if-none-match'] || '').split(',').some(value => value.trim().replace(/^W\//, '') === etag || value.trim() === '*')) {
+          res.writeHead(304); res.end(); return;
+        }
+        res.writeHead(200, { 'Content-Type': type, 'Content-Length': bytes.length }); res.end(bytes); return;
+      }
+      if (req.method === 'GET' && path === '/api/manuals') {
+        const items = readManuals();
+        send(200, url.searchParams.get('images') === 'links' ? await Promise.all(items.map(linkedManual)) : items); return;
+      }
       if (req.method === 'PUT' && path === '/api/manuals') {
-        editor(); const manual = validateManual(body);
+        editor(); const manual = validateManual(expandImages(body));
         const result = transaction(() => {
           const previous = get('SELECT revision FROM manuals WHERE id=?', manual.id);
           const historical = get('SELECT id FROM revisions WHERE manual_id=? LIMIT 1', manual.id);
           if ((previous && body.revision !== previous.revision) || (!previous && (body.revision || historical))) fail(409, '別のスタッフが更新または削除しました。入力内容を控えて、最新の内容を開き直してください。');
           if (!manual.owner) manual.owner = session.name;
           return record(manual, session.name, previous ? 'save' : 'create');
-        }); send(200, result); return;
+        }); send(200, url.searchParams.get('images') === 'links' ? await linkedManual(result) : result); return;
       }
       const manualPath = /^\/api\/manuals\/([a-zA-Z0-9_-]+)$/.exec(path);
       if (req.method === 'DELETE' && manualPath) {
@@ -286,7 +340,8 @@ export function createApplication({ dataDir = join(ROOT, 'data'), secureCookies 
       if (req.method === 'GET' && revisionPath) {
         const row = get('SELECT * FROM revisions WHERE id=?', Number(revisionPath[1]));
         if (!row) fail(404, '履歴がありません。');
-        send(200, { ...row, body: JSON.parse(row.body) }); return;
+        const manual = { ...JSON.parse(row.body), revision: row.revision };
+        send(200, { ...row, body: url.searchParams.get('images') === 'links' ? await linkedManual(manual) : manual }); return;
       }
       if (req.method === 'POST' && path === '/api/revert') {
         permit('restore'); const row = get('SELECT * FROM revisions WHERE id=?', Number(body.id));

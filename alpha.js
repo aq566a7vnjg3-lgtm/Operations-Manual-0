@@ -105,8 +105,8 @@ const guard = fn => async (...args) => { try { await fn(...args); } catch (error
 uiStore.get = function (key, fallback = []) { try { return JSON.parse(localStorage.getItem(`alpha-${staff?.id || 'guest'}-${key}`)) ?? fallback; } catch { return fallback; } };
 uiStore.set = function (key, value) { try { localStorage.setItem(`alpha-${staff?.id || 'guest'}-${key}`, JSON.stringify(value)); } catch { message('この端末ではお気に入り・履歴を保存できません。', true); } };
 today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(new Date());
-dbAll = () => api('manuals');
-dbPut = value => api('manuals', { method: 'PUT', data: value });
+dbAll = () => api('manuals?images=links');
+dbPut = value => api('manuals?images=links', { method: 'PUT', data: value });
 dbDel = id => api(`manuals/${encodeURIComponent(id)}`, { method: 'DELETE', data: { revision: editingRevision } });
 loadManuals = async () => {
   manuals = await dbAll();
@@ -174,10 +174,11 @@ addImages = async function (files) {
   for (const file of images) {
     try {
       if (file.size > 30 * 1024 * 1024) throw new Error('読込前の画像は30MBまでです。');
-      const src = await imageToData(file);
+      const optimized = await optimizeManualImage(file);
+      const { src, width, height, bytes } = optimized;
       if (generation !== imageGeneration) return;
-      if (src.length > 3 * 1024 * 1024 || editImages.reduce((n, im) => n + im.src.length, src.length) > 15 * 1024 * 1024) throw new Error('保存画像は1枚3MB、合計15MBまでです。');
-      editImages.push({ src, caption: '', step: 0 }); formDirty = true;
+      if (src.length > 3 * 1024 * 1024 || editImages.reduce((n, im) => n + (im.src.startsWith('data:') ? im.src.length : Math.ceil((im.bytes || 0) / 3) * 4 + 32), src.length) > 15 * 1024 * 1024) throw new Error('保存画像は1枚3MB、合計15MBまでです。画質を維持できるよう、画像を分割して追加してください。');
+      editImages.push({ src, width, height, bytes, caption: '', step: 0 }); formDirty = true;
     } catch (error) { message(`${file.name}: ${error.message}`, true); }
   }
   } finally { pendingImages -= images.length; }
@@ -188,6 +189,7 @@ $('#imageFiles').onchange = guard(async event => { await addImages(event.target.
 const originalOpenManual = openManual;
 openManual = function (id) {
   originalOpenManual(id); const manual = manuals.find(m => m.id === id); if (!manual) return;
+  $('#detailContent').dataset.revision = String(manual.revision);
   const due = manual.nextReview && manual.nextReview < today();
   $('#detailContent .updated').insertAdjacentHTML('afterend', `<div class="ownership-meta">
     <span>担当：${esc(manual.owner || '未設定')}</span><span>内容確認：${esc(manual.reviewed || '未設定')}</span>
@@ -231,7 +233,7 @@ async function openHistory(id = '') {
   show('historyScreen');
 }
 async function previewRevision(id) {
-  const row = await api(`history/${id}`), manual = row.body;
+  const row = await api(`history/${id}?images=links`), manual = row.body;
   const history = await api(`history?manual=${encodeURIComponent(row.manual_id)}`);
   const expectedRevision = history[0].revision;
   $('#revisionContent').innerHTML = `<h3>${esc(manual.title)}</h3><p class="small">第${row.revision}版 · ${esc(formatTime(row.at))} · ${esc(row.actor)}</p>
@@ -345,6 +347,7 @@ $('#passwordForm').onsubmit = async event => {
 };
 
 function loggedOut() {
+  if (viewer.open) viewer.close();
   clearIssued(); $('#resetForm').reset();
   clearInterval(syncTimer); syncTimer = null; staff = null; csrfToken = ''; imageGeneration++; formDirty = false;
   manuals = []; editImages = []; currentEditId = ''; currentDetailId = ''; editingRevision = 0;
@@ -381,8 +384,10 @@ async function syncManuals() {
   $('#syncState').textContent = `確認 ${new Date().toLocaleTimeString('ja-JP')}`;
   if ($('#detailScreen').classList.contains('active')) {
     const manual = manuals.find(m => m.id === currentDetailId);
-    if (manual) openManual(currentDetailId);
-    else { show('resultsScreen'); message('表示中のマニュアルは削除されました。'); }
+    if (viewer.open) return;
+    if (manual && $('#detailContent').dataset.revision !== String(manual.revision)) {
+      const scroll = window.scrollY; openManual(currentDetailId); window.scrollTo(0, scroll);
+    } else if (!manual) { show('resultsScreen'); message('表示中のマニュアルは削除されました。'); }
   }
 }
 window.addEventListener('focus', guard(syncManuals));

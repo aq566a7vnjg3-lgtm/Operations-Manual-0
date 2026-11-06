@@ -191,8 +191,8 @@ button{cursor:pointer}
           <div class="field full"><label>画像・スクリーンショット</label>
             <div id="imageDrop" class="image-drop" tabindex="0" aria-label="画像貼り付けエリア">
               <div class="image-toolbar"><button type="button" class="secondary" id="pickImages">＋ 画像を追加</button><span class="small">ここをクリックして Ctrl+V で貼り付け / ドラッグ＆ドロップ可能</span></div>
-              <input type="file" id="imageFiles" accept="image/*" multiple hidden>
-              <div class="help">画像は自動縮小して保存。各画像を「手順1」などに割り当てられます。変更後はマニュアルの「保存」を押してください。</div>
+              <input type="file" id="imageFiles" accept="image/png,image/jpeg,image/webp" multiple hidden>
+              <div class="help">PNG・JPEG・WebP対応。各画像を「手順1」などに割り当てられます。変更後はマニュアルの「保存」を押してください。</div>
               <div id="imageList" class="image-list"></div>
             </div>
           </div>
@@ -281,7 +281,7 @@ function renderImageEditor(){
  const list=$("#imageList");list.innerHTML="";
  editImages.forEach((im,i)=>{
   const item=document.createElement("div");item.className="image-item";
-  const picture=document.createElement("img");picture.src=im.src;picture.alt="登録画像";
+  const picture=document.createElement("img");prepareManualImage(picture,im);
   const caption=document.createElement("input");caption.placeholder="画像の説明（任意）";caption.value=im.caption||"";caption.oninput=()=>im.caption=caption.value;
   const pos=document.createElement("select");const count=lines($("#fSteps").value).length;
   for(let j=0;j<=count;j++){const o=document.createElement("option");o.value=j;o.textContent=j===0?"参考画像（末尾）":`手順 ${j} の下`;pos.append(o)}pos.value=Number(im.step)>count?"0":String(im.step||0);pos.onchange=()=>im.step=Number(pos.value);
@@ -289,14 +289,7 @@ function renderImageEditor(){
   item.append(picture,caption,pos,del);list.append(item)
  });
 }
-function imageToData(file){return new Promise((resolve,reject)=>{
- if(!file||!file.type.startsWith("image/")){reject(Error("画像ファイルではありません"));return}
- const reader=new FileReader();reader.onerror=()=>reject(Error("画像の読み取り失敗"));reader.onload=()=>{
- const img=new Image();img.onerror=()=>reject(Error("画像を開けません"));img.onload=()=>{
- const scale=Math.min(1,1600/Math.max(img.width,img.height));const canvas=document.createElement("canvas");canvas.width=Math.max(1,Math.round(img.width*scale));canvas.height=Math.max(1,Math.round(img.height*scale));const ctx=canvas.getContext("2d");ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(img,0,0,canvas.width,canvas.height);
- const png=canvas.toDataURL("image/png");resolve(png.length<1200000?png:canvas.toDataURL("image/jpeg",0.86));};img.src=reader.result
- };reader.readAsDataURL(file)
-})}
+async function imageToData(file){return (await optimizeManualImage(file)).src}
 async function addImages(files){const items=[...files].filter(f=>f.type.startsWith("image/"));if(!items.length)return;
  for(const f of items){try{const src=await imageToData(f);editImages.push({src,caption:"",step:0})}catch(e){alert(`${f.name||"画像"}: ${e.message}`)}}renderImageEditor()
 }
