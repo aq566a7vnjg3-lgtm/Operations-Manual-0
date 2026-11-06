@@ -2,6 +2,27 @@
 
 2026-11-06 / v0.7.0 / ローカル検証結果（本番反映は別途承認・確認）
 
+## 本番反映結果（同日実施）
+
+ユーザーの「すすめて～」という承認を受けて配置完了。
+
+- 公開URL: https://operations-manual-alpha.onrender.com/
+- 配置コード: `aed8d024abca7cd00ea932f4eb1c16a068cb8926`
+- Render配置: `dep-dbmnph3bc2fs73ag0th0`（live）
+- Build Command: `npm ci && npm test`。Render上でも39件成功、失敗0件。
+- `/health`: `ok:true`、`version:0.7.0-images`、`preview:false`。
+- 有料Compute・5GBディスク・環境変数・起動コマンドは維持。起動ログの保存先 `/var/data` を確認。
+- 公開配信中のJS/CSSとローカルソースのSHA-256一致を確認。
+- 本番で未保存の検証PNGを追加し、1920×1080のWebP 16,016 bytesへ変換。元PNG 202,031 bytesとの全RGBA画素一致を確認。
+- 既存マニュアルの検索・画像表示・画面外画像の未取得・130%拡大・Esc終了を確認。終了前後のスクロール位置は588pxで一致。
+- 未ログインで本番の画像URLへアクセスすると401になることを確認。
+- 更新前後に全体バックアップを取得し、SQLite整合性正常。users 2件・manuals 1件・revisions 6件・audit 6件の全行が完全一致。
+- 既存のパスワードハッシュ・権限・資料本文・画像・更新履歴を変更していない。検証画像はマニュアルとして保存していない。
+- バックアップはGitHub外の `../private-backups/before-images-20261106.sqlite` と `after-images-20261106.sqlite` に保管。
+- 実機iPhone/iPad/Safariは未検証。ETag/304はローカルEdgeとRender上の自動テストで確認済みだが、公開URL経由の304ログはRenderログ取得基盤の503により採取できていない。
+
+以下は本番反映前にまとめた調査・ローカル検証の記録です。
+
 ## 調査結果
 
 対象は `render-alpha/`。Node.js 24、SQLite、Vanilla JSの構成です。
