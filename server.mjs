@@ -66,6 +66,9 @@ export function validateManual(input) {
     out[key] = list.map(value => text(value, key, key === 'steps' ? 20000 : 2000, true));
   }
   const images = input.images ?? [];
+  const bodies = input.stepBodies ?? [];
+  if (!Array.isArray(bodies) || bodies.length > out.steps.length) fail(400, '手順本文の形式・件数を確認してください。');
+  out.stepBodies = out.steps.map((_, i) => text(bodies[i], '手順本文', 20000));
   if (!Array.isArray(images) || images.length > 50) fail(400, '画像は1件につき50枚までです。');
   let size = 0;
   out.images = images.map(image => {

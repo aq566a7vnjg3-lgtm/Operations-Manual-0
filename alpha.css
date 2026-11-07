@@ -62,3 +62,10 @@ html { scrollbar-gutter: stable; }
   .image-viewer-toolbar button { width: 40px; flex-basis: 40px; }
   #imageViewerScale { flex-basis: 48px; }
 }
+.step-body{white-space:pre-wrap;overflow-wrap:anywhere;margin-top:10px}
+.article a,.print-sheet a{overflow-wrap:anywhere}
+#stepEditor{display:grid;gap:12px;margin-bottom:12px}
+.step-edit-row{border-bottom:1px solid var(--line);padding-bottom:12px;display:grid;gap:8px}
+.step-edit-row label{display:grid;gap:4px}
+.step-edit-row input,.step-edit-row textarea{font-weight:400;min-width:0;width:100%;box-sizing:border-box}
+.step-edit-row button{justify-self:end}

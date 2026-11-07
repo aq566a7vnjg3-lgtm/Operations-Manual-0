@@ -150,7 +150,7 @@ $('#manualForm').removeEventListener('submit', saveManual);
 $('#manualForm').addEventListener('submit', sharedSave);
 $('#manualForm').addEventListener('input', () => { formDirty = true; });
 $('#manualForm').addEventListener('change', () => { formDirty = true; });
-$('#manualForm').addEventListener('click', event => { if (event.target.closest('.image-item button')) formDirty = true; });
+$('#manualForm').addEventListener('click', event => { if (event.target.closest('.image-item button, .remove-step, #addStep')) formDirty = true; });
 window.addEventListener('beforeunload', event => { if (formDirty) { event.preventDefault(); event.returnValue = ''; } });
 $('#duplicateManual').onclick = guard(async () => {
   if (!currentEditId || saving) return;
@@ -237,10 +237,10 @@ async function previewRevision(id) {
   const history = await api(`history?manual=${encodeURIComponent(row.manual_id)}`);
   const expectedRevision = history[0].revision;
   $('#revisionContent').innerHTML = `<h3>${esc(manual.title)}</h3><p class="small">第${row.revision}版 · ${esc(formatTime(row.at))} · ${esc(row.actor)}</p>
-    <p>担当：${esc(manual.owner || '未設定')}</p><p>${esc(manual.description)}</p>
+    <p>担当：${esc(manual.owner || '未設定')}</p><p>${linkedText(manual.description)}</p>
     <h3>必要なもの</h3><ul>${manual.required.map(x => `<li>${esc(x)}</li>`).join('')}</ul>
-    <h3>手順</h3><ol>${manual.steps.map((x, i) => `<li>${esc(x)}${imageFigures(manual, i + 1)}</li>`).join('')}</ol>${imageFigures(manual, 0)}
-    <h3>注意・重要事項</h3><p class="preserve-lines">${esc(manual.notice)}\n${esc(manual.danger)}</p>`;
+    <h3>手順</h3><ol>${manual.steps.map((x, i) => `<li>${stepContent(manual,i)}${imageFigures(manual, i + 1)}</li>`).join('')}</ol>${imageFigures(manual, 0)}
+    <h3>注意・重要事項</h3><p class="preserve-lines">${linkedText(manual.notice)}\n${linkedText(manual.danger)}</p>`;
   $('#restoreRevision').hidden = !hasPermission('restore') || row.action === 'delete';
   $('#restoreRevision').onclick = guard(async () => {
     if (!confirm(`「${manual.title}」を第${row.revision}版の内容へ戻しますか？`)) return;

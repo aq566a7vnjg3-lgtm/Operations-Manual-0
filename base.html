@@ -187,7 +187,7 @@ button{cursor:pointer}
           <div class="field full"><label>タグ</label><input id="fTags" placeholder="普通車, 軽自動車, 所有権"><div class="help">カンマ区切り</div></div>
           <div class="field full"><label>検索キーワード</label><input id="fKeywords" placeholder="所有権解除, 所有権, 名変, ローン完済"><div class="help">略称・同義語もカンマ区切りで登録</div></div>
           <div class="field full"><label>必要なもの</label><textarea id="fRequired" placeholder="車検証&#10;印鑑証明書&#10;委任状"></textarea><div class="help">1行につき1項目</div></div>
-          <div class="field full"><label>手順</label><textarea id="fSteps" placeholder="車検証の所有者を確認する&#10;所有権先へ解除書類を依頼する"></textarea><div class="help">1行につき1ステップ。表示時に自動で①②③</div></div>
+          <div class="field full"><label>手順</label><div id="stepEditor"></div><button type="button" class="secondary" id="addStep">＋ 手順を追加</button></div>
           <div class="field full"><label>画像・スクリーンショット</label>
             <div id="imageDrop" class="image-drop" tabindex="0" aria-label="画像貼り付けエリア">
               <div class="image-toolbar"><button type="button" class="secondary" id="pickImages">＋ 画像を追加</button><span class="small">ここをクリックして Ctrl+V で貼り付け / ドラッグ＆ドロップ可能</span></div>
@@ -227,6 +227,28 @@ function dbClear(){return new Promise((res,rej)=>{const t=db.transaction(STORE_N
 async function loadManuals(){manuals=await dbAll();if(!manuals.length){for(const m of SEED)await dbPut(m);manuals=await dbAll()}manuals.sort((a,b)=>(a.title||"").localeCompare(b.title||"","ja"));refreshAll()}
 
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function linkedText(value){
+ const source=String(value??"");let end=0,result="";
+ for(const match of source.matchAll(/https?:\/\/[^\s<>"'\u3000]+/gi)){
+  const url=match[0].replace(/[.,;!?)\]、。）」』]+$/u,"");
+  result+=esc(source.slice(end,match.index));
+  result+=`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(url)}</a>`;
+  end=match.index+url.length;
+ }
+ return result+esc(source.slice(end));
+}
+function stepContent(m,i){return `<strong>${linkedText(m.steps[i])}</strong>${m.stepBodies?.[i]?`<div class="step-body">${linkedText(m.stepBodies[i])}</div>`:""}`}
+function appendStep(title="",body=""){
+ const row=document.createElement("div");row.className="step-edit-row";
+ row.innerHTML=`<label>表題<input class="step-title-input" required maxlength="20000" value="${esc(title)}"></label><label>本文<textarea class="step-body-input" maxlength="20000">${esc(body)}</textarea></label><button type="button" class="remove-step secondary" title="手順を削除" aria-label="手順を削除">×</button>`;
+ row.querySelector(".remove-step").onclick=()=>{
+  const index=[...row.parentNode.children].indexOf(row)+1;
+  editImages.forEach(im=>{if(Number(im.step)===index)im.step=0;else if(Number(im.step)>index)im.step=Number(im.step)-1});
+  row.remove();renderImageEditor();
+ };
+ $("#stepEditor").append(row);
+}
+function setStepEditor(m={}){ $("#stepEditor").replaceChildren();(m.steps||[]).forEach((title,i)=>appendStep(title,m.stepBodies?.[i]||"")) }
 function show(id){document.querySelectorAll(".screen").forEach(x=>x.classList.remove("active"));$("#"+id).classList.add("active");window.scrollTo(0,0)}
 function norm(s){return(s||"").toLowerCase().replace(/\s+/g,"")}
 function score(m,q){if(!q)return 1;const n=norm(q),title=norm(m.title),desc=norm(m.description),words=[...(m.tags||[]),...(m.keywords||[])].map(norm);let s=0;if(title===n)s+=100;if(title.includes(n))s+=70;if(words.some(w=>w===n))s+=60;if(words.some(w=>w.includes(n)||n.includes(w)))s+=40;if(desc.includes(n))s+=15;return s}
@@ -249,7 +271,7 @@ function doSearch(q){q=q.trim();lastQuery=q;$("#homeSearch").value=q;$("#results
 function renderResults(q){
  const arr=manuals.map(m=>({m,s:score(m,q)})).filter(x=>x.s>0).sort((a,b)=>b.s-a.s).map(x=>x.m);
  $("#resultCount").textContent=q?`「${q}」の検索結果 ${arr.length}件`:`マニュアル ${arr.length}件`;
- $("#resultsList").innerHTML=arr.length?arr.map(m=>`<article class="result-item"><div class="result-path">業務マニュアル ＞ ${esc(m.category)}</div><div class="row"><button class="result-title" data-open="${m.id}">${esc(m.title)}</button><button class="star-btn" data-star="${m.id}">${isFav(m.id)?"★":"☆"}</button></div><div class="result-desc">${esc(m.description)}</div><div class="result-meta">${(m.tags||[]).map(t=>`<span class="chip">${esc(t)}</span>`).join("")}<span class="chip">更新 ${fmtDate(m.updated)}</span></div></article>`).join(""):`<div class="empty">該当するマニュアルがありません</div>`;
+ $("#resultsList").innerHTML=arr.length?arr.map(m=>`<article class="result-item"><div class="result-path">業務マニュアル ＞ ${esc(m.category)}</div><div class="row"><button class="result-title" data-open="${m.id}">${esc(m.title)}</button><button class="star-btn" data-star="${m.id}">${isFav(m.id)?"★":"☆"}</button></div><div class="result-desc">${linkedText(m.description)}</div><div class="result-meta">${(m.tags||[]).map(t=>`<span class="chip">${esc(t)}</span>`).join("")}<span class="chip">更新 ${fmtDate(m.updated)}</span></div></article>`).join(""):`<div class="empty">該当するマニュアルがありません</div>`;
  document.querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>openManual(b.dataset.open));
  document.querySelectorAll("[data-star]").forEach(b=>b.onclick=()=>{toggleFav(b.dataset.star);renderResults(lastQuery)})
 }
@@ -259,7 +281,7 @@ function openManual(id){
  const m=manuals.find(x=>x.id===id);if(!m)return;currentDetailId=id;addRecent(id);
  $("#detailHeaderTitle").textContent=m.title;$("#detailStar").textContent=isFav(id)?"★":"☆";$("#detailStar").onclick=()=>toggleFav(id);
  const related=(m.related||[]).map(id=>manuals.find(x=>x.id===id)).filter(Boolean);
- $("#detailContent").innerHTML=`<div class="detail-grid"><nav class="toc"><a href="#summary">概要</a><a href="#required">必要なもの</a><a href="#steps">手順</a><a href="#images">画像</a><a href="#notice">注意事項</a></nav><main class="article"><div class="breadcrumb">業務マニュアル ＞ ${esc(m.category)}</div><h1>${esc(m.title)}</h1><div class="updated">最終更新 ${fmtDate(m.updated)}</div><div id="summary" class="summary">${esc(m.description)}</div><section id="required" class="block"><h2>必要なもの</h2><div class="checklist">${(m.required||[]).length?(m.required||[]).map(x=>`<div class="check">• ${esc(x)}</div>`).join(""):`<div class="small">登録なし</div>`}</div></section><section id="steps" class="block"><h2>手順</h2><div class="steps">${(m.steps||[]).length?(m.steps||[]).map((x,i)=>`<div class="step"><span class="step-num">${i+1}</span>${esc(x)}${imageFigures(m,i+1)}</div>`).join(""):`<div class="small">登録なし</div>`}</div></section><section id="images" class="block"><h2>参考画像</h2>${imageFigures(m,0)||`<div class="small">手順内に掲載された画像、または登録なし</div>`}</section><section id="notice" class="block"><h2>注意事項</h2>${m.notice?`<div class="notice">⚠ ${esc(m.notice)}</div>`:`<div class="small">登録なし</div>`}${m.danger?`<div class="danger" style="margin-top:10px">! ${esc(m.danger)}</div>`:""}</section></main><aside class="sideinfo"><div class="sidebox"><h3>対象</h3><div>${esc(m.target||"未設定")}</div></div><div class="sidebox"><h3>関連マニュアル</h3>${related.length?related.map(r=>`<button class="related-btn" data-related="${r.id}">${esc(r.title)}</button>`).join(""):`<div class="mini-meta">なし</div>`}</div></aside></div>`;
+ $("#detailContent").innerHTML=`<div class="detail-grid"><nav class="toc"><a href="#summary">概要</a><a href="#required">必要なもの</a><a href="#steps">手順</a><a href="#images">画像</a><a href="#notice">注意事項</a></nav><main class="article"><div class="breadcrumb">業務マニュアル ＞ ${esc(m.category)}</div><h1>${esc(m.title)}</h1><div class="updated">最終更新 ${fmtDate(m.updated)}</div><div id="summary" class="summary">${linkedText(m.description)}</div><section id="required" class="block"><h2>必要なもの</h2><div class="checklist">${(m.required||[]).length?(m.required||[]).map(x=>`<div class="check">• ${linkedText(x)}</div>`).join(""):`<div class="small">登録なし</div>`}</div></section><section id="steps" class="block"><h2>手順</h2><div class="steps">${(m.steps||[]).length?(m.steps||[]).map((x,i)=>`<div class="step"><span class="step-num">${i+1}</span>${stepContent(m,i)}${imageFigures(m,i+1)}</div>`).join(""):`<div class="small">登録なし</div>`}</div></section><section id="images" class="block"><h2>参考画像</h2>${imageFigures(m,0)||`<div class="small">手順内に掲載された画像、または登録なし</div>`}</section><section id="notice" class="block"><h2>注意事項</h2>${m.notice?`<div class="notice">⚠ ${linkedText(m.notice)}</div>`:`<div class="small">登録なし</div>`}${m.danger?`<div class="danger" style="margin-top:10px">! ${linkedText(m.danger)}</div>`:""}</section></main><aside class="sideinfo"><div class="sidebox"><h3>対象</h3><div>${esc(m.target||"未設定")}</div></div><div class="sidebox"><h3>関連マニュアル</h3>${related.length?related.map(r=>`<button class="related-btn" data-related="${r.id}">${esc(r.title)}</button>`).join(""):`<div class="mini-meta">なし</div>`}</div></aside></div>`;
  document.querySelectorAll("[data-related]").forEach(b=>b.onclick=()=>openManual(b.dataset.related));document.querySelectorAll(".manual-figure img").forEach(img=>img.onclick=()=>showImageZoom(img.src));show("detailScreen")
 }
 
@@ -283,7 +305,7 @@ function renderImageEditor(){
   const item=document.createElement("div");item.className="image-item";
   const picture=document.createElement("img");prepareManualImage(picture,im);
   const caption=document.createElement("input");caption.placeholder="画像の説明（任意）";caption.value=im.caption||"";caption.oninput=()=>im.caption=caption.value;
-  const pos=document.createElement("select");const count=lines($("#fSteps").value).length;
+  const pos=document.createElement("select");const count=document.querySelectorAll("#stepEditor .step-edit-row").length;
   for(let j=0;j<=count;j++){const o=document.createElement("option");o.value=j;o.textContent=j===0?"参考画像（末尾）":`手順 ${j} の下`;pos.append(o)}pos.value=Number(im.step)>count?"0":String(im.step||0);pos.onchange=()=>im.step=Number(pos.value);
   const del=document.createElement("button");del.type="button";del.className="danger-btn";del.textContent="削除";del.onclick=()=>{editImages.splice(i,1);renderImageEditor()};
   item.append(picture,caption,pos,del);list.append(item)
@@ -294,15 +316,15 @@ async function addImages(files){const items=[...files].filter(f=>f.type.startsWi
  for(const f of items){try{const src=await imageToData(f);editImages.push({src,caption:"",step:0})}catch(e){alert(`${f.name||"画像"}: ${e.message}`)}}renderImageEditor()
 }
 function clearForm(){
- currentEditId="";editImages=[];$("#manualForm").reset();renderImageEditor();$("#fId").value="";$("#fUpdated").value=today();$("#editorTitle").textContent="新規マニュアル";$("#editState").textContent="新規";$("#duplicateManual").disabled=true;$("#deleteManual").disabled=true;renderAdminOptions();renderAdminList($("#adminSearch").value)
+ currentEditId="";editImages=[];$("#manualForm").reset();setStepEditor();renderImageEditor();$("#fId").value="";$("#fUpdated").value=today();$("#editorTitle").textContent="新規マニュアル";$("#editState").textContent="新規";$("#duplicateManual").disabled=true;$("#deleteManual").disabled=true;renderAdminOptions();renderAdminList($("#adminSearch").value)
 }
 function editManual(id){
  const m=manuals.find(x=>x.id===id);if(!m)return;currentEditId=id;editImages=structuredClone(m.images||[]);
- $("#fId").value=m.id;$("#fTitle").value=m.title||"";$("#fCategory").value=m.category||"";$("#fDescription").value=m.description||"";$("#fTarget").value=m.target||"";$("#fUpdated").value=m.updated||today();$("#fTags").value=(m.tags||[]).join(", ");$("#fKeywords").value=(m.keywords||[]).join(", ");$("#fRequired").value=(m.required||[]).join("\n");$("#fSteps").value=(m.steps||[]).join("\n");$("#fNotice").value=m.notice||"";$("#fDanger").value=m.danger||"";renderImageEditor();
+ $("#fId").value=m.id;$("#fTitle").value=m.title||"";$("#fCategory").value=m.category||"";$("#fDescription").value=m.description||"";$("#fTarget").value=m.target||"";$("#fUpdated").value=m.updated||today();$("#fTags").value=(m.tags||[]).join(", ");$("#fKeywords").value=(m.keywords||[]).join(", ");$("#fRequired").value=(m.required||[]).join("\n");setStepEditor(m);$("#fNotice").value=m.notice||"";$("#fDanger").value=m.danger||"";renderImageEditor();
  $("#editorTitle").textContent=m.title;$("#editState").textContent="編集中";$("#duplicateManual").disabled=false;$("#deleteManual").disabled=false;renderAdminOptions();[...$("#fRelated").options].forEach(o=>o.selected=(m.related||[]).includes(o.value));renderAdminList($("#adminSearch").value)
 }
 function formToManual(forceId=null){
- return{id:forceId||$("#fId").value||slug(),title:$("#fTitle").value.trim(),category:$("#fCategory").value.trim(),description:$("#fDescription").value.trim(),target:$("#fTarget").value.trim(),updated:$("#fUpdated").value||today(),tags:csv($("#fTags").value),keywords:csv($("#fKeywords").value),required:lines($("#fRequired").value),steps:lines($("#fSteps").value),notice:$("#fNotice").value.trim(),danger:$("#fDanger").value.trim(),images:editImages.map(im=>({...im,step:Number(im.step)<=lines($("#fSteps").value).length?Number(im.step):0})),related:[...$("#fRelated").selectedOptions].map(o=>o.value)}
+ return{id:forceId||$("#fId").value||slug(),title:$("#fTitle").value.trim(),category:$("#fCategory").value.trim(),description:$("#fDescription").value.trim(),target:$("#fTarget").value.trim(),updated:$("#fUpdated").value||today(),tags:csv($("#fTags").value),keywords:csv($("#fKeywords").value),required:lines($("#fRequired").value),steps:[...document.querySelectorAll("#stepEditor .step-title-input")].map(x=>x.value.trim()),stepBodies:[...document.querySelectorAll("#stepEditor .step-body-input")].map(x=>x.value.trim()),notice:$("#fNotice").value.trim(),danger:$("#fDanger").value.trim(),images:editImages.map(im=>({...im,step:Number(im.step)<=document.querySelectorAll("#stepEditor .step-edit-row").length?Number(im.step):0})),related:[...$("#fRelated").selectedOptions].map(o=>o.value)}
 }
 async function saveManual(e){e.preventDefault();const x=formToManual();try{await dbPut(x);await loadManuals();editManual(x.id);$("#saveMsg").textContent="保存しました";setTimeout(()=>$("#saveMsg").textContent="",1500)}catch(err){console.error(err);alert("保存に失敗しました。画像が多すぎるか、ブラウザの保存容量が不足している可能性があります。")}}
 async function duplicateManual(){if(!currentEditId)return;const x=formToManual(slug());x.title+=" コピー";x.updated=today();await dbPut(x);await loadManuals();editManual(x.id)}
@@ -323,7 +345,7 @@ $("#imageDrop").addEventListener("paste",e=>{const files=[...e.clipboardData.ite
 $("#imageDrop").addEventListener("dragover",e=>{e.preventDefault();e.currentTarget.classList.add("dragover")});
 $("#imageDrop").addEventListener("dragleave",e=>e.currentTarget.classList.remove("dragover"));
 $("#imageDrop").addEventListener("drop",e=>{e.preventDefault();e.currentTarget.classList.remove("dragover");addImages(e.dataTransfer.files)});
-$("#fSteps").addEventListener("blur",renderImageEditor);
+$("#addStep").onclick=()=>{appendStep();renderImageEditor()};
 $("#manualForm").addEventListener("submit",saveManual);$("#duplicateManual").onclick=duplicateManual;$("#deleteManual").onclick=deleteManual;
 $("#exportJson").onclick=exportJson;$("#importJson").addEventListener("change",e=>{importJson(e.target.files[0]);e.target.value=""});
 

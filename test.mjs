@@ -4,11 +4,20 @@ import { mkdtempSync, readdirSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { createApplication } from './server.mjs';
+import { createApplication, validateManual } from './server.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const fixture = { id: 'test-manual', title: '共有テスト', category: 'テスト', description: '確認用', steps: ['手順1'], tags: ['登録'], keywords: ['テスト'], required: ['確認物'], related: [], images: [], owner: '担当者A', reviewed: '2026-10-18', nextReview: '2026-11-18', notice: '注意', danger: '', updated: '2026-10-18', changeNote: '初版' };
 const pass = 'TestPass1234';
+
+test('step titles and bodies preserve legacy records and reject malformed bodies', () => {
+  assert.deepEqual(validateManual(fixture).steps, ['手順1']);
+  assert.deepEqual(validateManual(fixture).stepBodies, ['']);
+  assert.deepEqual(validateManual({ ...fixture, stepBodies: ['本文\nhttps://example.com/'] }).stepBodies, ['本文\nhttps://example.com/']);
+  for (const stepBodies of ['text', [123], [{}], ['a', 'b'], ['a'.repeat(20001)]]) {
+    assert.throws(() => validateManual({ ...fixture, stepBodies }));
+  }
+});
 
 function client(origin) {
   let cookie = '', csrf = '';
